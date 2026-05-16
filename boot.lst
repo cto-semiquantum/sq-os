@@ -1,0 +1,241 @@
+     1                                  [org 0x7c00]
+     2                                  
+     3                                  cursor equ 0x7e00
+     4                                  input  equ 0x7e02
+     5                                  
+     6 00000000 B800B8                  mov ax,0xb800
+     7 00000003 8EC0                    mov es,ax
+     8                                  
+     9 00000005 E87801                  call clear
+    10 00000008 E86401                  call draw_ui
+    11                                  
+    12 0000000B C706007E0005            mov word [cursor],1280
+    13                                  
+    14                                  main:
+    15 00000011 8B3E007E                mov di,[cursor]
+    16 00000015 BE[F601]                mov si,prompt
+    17 00000018 E83601                  call print
+    18 0000001B BB027E                  mov bx,input
+    19                                  
+    20                                  input_loop:
+    21 0000001E B400                    mov ah,0
+    22 00000020 CD16                    int 0x16
+    23 00000022 3C0D                    cmp al,13
+    24 00000024 742C                    je newline
+    25 00000026 3C08                    cmp al,8
+    26 00000028 7410                    je backspace
+    27 0000002A 8B3E007E                mov di,[cursor]
+    28 0000002E 8807                    mov [bx],al
+    29 00000030 43                      inc bx
+    30 00000031 B40F                    mov ah,0x0f
+    31 00000033 AB                      stosw
+    32 00000034 893E007E                mov [cursor],di
+    33 00000038 EBE4                    jmp input_loop
+    34                                  
+    35                                  backspace:
+    36 0000003A A1007E                  mov ax,[cursor]
+    37 0000003D 3D0805                  cmp ax,1288
+    38 00000040 7EDC                    jle input_loop
+    39 00000042 832E007E02              sub word [cursor],2
+    40 00000047 4B                      dec bx
+    41 00000048 8B3E007E                mov di,[cursor]
+    42 0000004C B82007                  mov ax,0x0720
+    43 0000004F AB                      stosw
+    44 00000050 EBCC                    jmp input_loop
+    45                                  
+    46                                  newline:
+    47 00000052 C60700                  mov byte [bx],0
+    48 00000055 BB[BD01]                mov bx, handlers
+    49 00000058 BF[8B01]                mov di, commands
+    50                                  .next_cmd:
+    51 0000005B 803D00                  cmp byte [di], 0
+    52 0000005E 745E                    je nothelp
+    53 00000060 BE027E                  mov si, input
+    54 00000063 E8D900                  call strcmp
+    55 00000066 7212                    jc .match
+    56                                  .skip:
+    57 00000068 807DFF00                cmp byte [di-1], 0
+    58 0000006C 7407                    je .next_handler
+    59                                  .skip_loop:
+    60 0000006E 47                      inc di
+    61 0000006F 807DFF00                cmp byte [di-1], 0
+    62 00000073 75F9                    jne .skip_loop
+    63                                  .next_handler:
+    64 00000075 83C302                  add bx, 2
+    65 00000078 EBE1                    jmp .next_cmd
+    66                                  .match:
+    67 0000007A FF27                    jmp word [bx]
+    68                                  
+    69                                  showhelp:
+    70 0000007C E8E100                  call newline_cursor
+    71 0000007F 8B3E007E                mov di, [cursor]
+    72 00000083 BE[8B01]                mov si, commands
+    73                                  .loop:
+    74 00000086 AC                      lodsb
+    75 00000087 08C0                    or al, al
+    76 00000089 7405                    jz .space
+    77 0000008B B40B                    mov ah, 0x0b
+    78 0000008D AB                      stosw
+    79 0000008E EBF6                    jmp .loop
+    80                                  .space:
+    81 00000090 B8200B                  mov ax, 0x0b20
+    82 00000093 AB                      stosw
+    83 00000094 803C00                  cmp byte [si], 0
+    84 00000097 75ED                    jne .loop
+    85 00000099 893E007E                mov [cursor], di
+    86 0000009D E98600                  jmp print_msg_command_end
+    87                                  
+    88                                  showversion:
+    89 000000A0 BE[CD01]                mov si,versionmsg
+    90 000000A3 EB77                    jmp print_msg_command
+    91                                  
+    92                                  showwhoami:
+    93 000000A5 BE[D801]                mov si,whoamimsg
+    94 000000A8 EB72                    jmp print_msg_command
+    95                                  
+    96                                  doclear:
+    97 000000AA E8D300                  call clear
+    98 000000AD E8BF00                  call draw_ui
+    99 000000B0 C706007E0005            mov word [cursor],1280
+   100 000000B6 BB027E                  mov bx,input
+   101 000000B9 E955FF                  jmp main
+   102                                  
+   103                                  doreboot:
+   104 000000BC CD19                    int 0x19
+   105                                  
+   106                                  nothelp:
+   107 000000BE E89F00                  call newline_cursor
+   108 000000C1 BB027E                  mov bx,input
+   109 000000C4 E94AFF                  jmp main
+   110                                  
+   111                                  showdate:
+   112 000000C7 E89600                  call newline_cursor
+   113 000000CA 8B3E007E                mov di, [cursor]
+   114 000000CE B404                    mov ah, 04h
+   115 000000D0 CD1A                    int 1ah
+   116 000000D2 88D0                    mov al, dl
+   117 000000D4 E85800                  call print_bcd
+   118 000000D7 B82F0F                  mov ax, 0x0f2f
+   119 000000DA AB                      stosw
+   120 000000DB 88F0                    mov al, dh
+   121 000000DD E84F00                  call print_bcd
+   122 000000E0 B82F0F                  mov ax, 0x0f2f
+   123 000000E3 AB                      stosw
+   124 000000E4 88E8                    mov al, ch
+   125 000000E6 E84600                  call print_bcd
+   126 000000E9 88C8                    mov al, cl
+   127 000000EB E84100                  call print_bcd
+   128 000000EE 893E007E                mov [cursor], di
+   129 000000F2 EB32                    jmp print_msg_command_end
+   130                                  
+   131                                  showtime:
+   132 000000F4 E86900                  call newline_cursor
+   133 000000F7 8B3E007E                mov di, [cursor]
+   134 000000FB B402                    mov ah, 02h
+   135 000000FD CD1A                    int 1ah
+   136 000000FF 88E8                    mov al, ch
+   137 00000101 E82B00                  call print_bcd
+   138 00000104 B83A0F                  mov ax, 0x0f3a
+   139 00000107 AB                      stosw
+   140 00000108 88C8                    mov al, cl
+   141 0000010A E82200                  call print_bcd
+   142 0000010D B83A0F                  mov ax, 0x0f3a
+   143 00000110 AB                      stosw
+   144 00000111 88F0                    mov al, dh
+   145 00000113 E81900                  call print_bcd
+   146 00000116 893E007E                mov [cursor], di
+   147 0000011A EB0A                    jmp print_msg_command_end
+   148                                  
+   149                                  print_msg_command:
+   150 0000011C E84100                  call newline_cursor
+   151 0000011F 8B3E007E                mov di,[cursor]
+   152 00000123 E82B00                  call print
+   153                                  print_msg_command_end:
+   154 00000126 E83700                  call newline_cursor
+   155 00000129 BB027E                  mov bx,input
+   156 0000012C E9E2FE                  jmp main
+   157                                  
+   158                                  print_bcd:
+   159 0000012F 50                      push ax
+   160 00000130 C0E804                  shr al, 4
+   161 00000133 E80100                  call .nibble
+   162 00000136 58                      pop ax
+   163                                  .nibble:
+   164 00000137 240F                    and al, 0x0f
+   165 00000139 0430                    add al, '0'
+   166 0000013B B40F                    mov ah, 0x0f
+   167 0000013D AB                      stosw
+   168 0000013E C3                      ret
+   169                                  
+   170                                  strcmp:
+   171                                  .loop:
+   172 0000013F AC                      lodsb
+   173 00000140 8A25                    mov ah,[di]
+   174 00000142 47                      inc di
+   175 00000143 38E0                    cmp al,ah
+   176 00000145 7506                    jne .fail
+   177 00000147 3C00                    cmp al,0
+   178 00000149 7404                    je .match
+   179 0000014B EBF2                    jmp .loop
+   180                                  .fail:
+   181 0000014D F8                      clc
+   182 0000014E C3                      ret
+   183                                  .match:
+   184 0000014F F9                      stc
+   185 00000150 C3                      ret
+   186                                  
+   187                                  print:
+   188                                  .next:
+   189 00000151 AC                      lodsb
+   190 00000152 08C0                    or al,al
+   191 00000154 7405                    jz .done
+   192 00000156 B40B                    mov ah,0x0b
+   193 00000158 AB                      stosw
+   194 00000159 EBF6                    jmp .next
+   195                                  .done:
+   196 0000015B 893E007E                mov [cursor],di
+   197 0000015F C3                      ret
+   198                                  
+   199                                  newline_cursor:
+   200 00000160 A1007E                  mov ax,[cursor]
+   201 00000163 B3A0                    mov bl,160
+   202 00000165 F6F3                    div bl
+   203 00000167 FEC0                    inc al
+   204 00000169 F6E3                    mul bl
+   205 0000016B A3007E                  mov [cursor],ax
+   206 0000016E C3                      ret
+   207                                  
+   208                                  draw_ui:
+   209 0000016F BFA000                  mov di,160
+   210 00000172 BE[CD01]                mov si,versionmsg
+   211 00000175 E8D9FF                  call print
+   212 00000178 BF8002                  mov di,640
+   213 0000017B BE[E901]                mov si,logs
+   214 0000017E EBD1                    jmp print
+   215                                  
+   216                                  clear:
+   217 00000180 31FF                    xor di,di
+   218 00000182 B9D007                  mov cx,2000
+   219 00000185 B82007                  mov ax,0x0720
+   220 00000188 F3AB                    rep stosw
+   221 0000018A C3                      ret
+   222                                  
+   223 0000018B 68656C7000636C6561-     commands db 'help',0,'clear',0,'about',0,'reboot',0,'version',0,'whoami',0,'date',0,'time',0,0
+   223 00000194 720061626F75740072-
+   223 0000019D 65626F6F7400766572-
+   223 000001A6 73696F6E0077686F61-
+   223 000001AF 6D6900646174650074-
+   223 000001B8 696D650000         
+   224 000001BD [7C00][AA00][A000]-     handlers dw showhelp, doclear, showversion, doreboot, showversion, showwhoami, showdate, showtime
+   224 000001C3 [BC00][A000][A500]-
+   224 000001C9 [C700][F400]       
+   225 000001CD 5351204F532076312E-     versionmsg db 'SQ OS v1.0',0
+   225 000001D6 3000               
+   226 000001D8 73656D697175616E74-     whoamimsg db 'semiquantum-user',0
+   226 000001E1 756D2D7573657200   
+   227 000001E9 53797374656D205265-     logs db 'System Ready',0
+   227 000001F2 61647900           
+   228 000001F6 3E2000                  prompt db '> ',0
+   229                                  
+   230 000001F9 00<rep 5h>              times 510-($-$$) db 0
+   231 000001FE 55AA                    dw 0xaa55
