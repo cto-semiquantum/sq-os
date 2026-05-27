@@ -6,6 +6,6 @@ echo Compiling Kernel...
 nasm -f bin kernel.asm -o kernel.bin
 
 echo Linking OS Image...
-copy /b boot.bin + kernel.bin os.img > nul
+python -c "open('os.img', 'wb').write(open('boot.bin', 'rb').read() + open('kernel.bin', 'rb').read())"
 
 echo Build Complete: os.img

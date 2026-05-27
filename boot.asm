@@ -11,7 +11,7 @@ mov sp, 0x7c00
 
 ; Load kernel from disk
 mov ah, 0x02
-mov al, 20        ; Load 20 sectors (10KB) to be absolutely safe
+mov al, 30        ; Load 30 sectors (15KB)
 mov ch, 0
 mov cl, 2
 mov dh, 0

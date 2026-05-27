@@ -80,7 +80,7 @@ pm_start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x9000
+    mov esp, 0x90000
 
     ; Build IDT at 0x2000
     mov edi, 0x2000
@@ -360,7 +360,6 @@ do_reboot:
 do_gui:
     cli
     ; === SET VGA MODE 13h via direct register writes ===
-    ; Helper: vga_write - al=index, ah=value, dx=base port
     ; Misc Output
     mov dx, 0x3C2
     mov al, 0x63
@@ -453,97 +452,204 @@ do_gui:
     mov al, 0x20
     out dx, al
 
-    sti
+    ; === INITIALIZE PS/2 MOUSE ===
+    ; Enable auxiliary mouse device
+    mov al, 0xA8
+    out 0x64, al
 
-    ; === DRAW DESKTOP ===
-    ; Black background
-    mov edi, 0xA0000
-    mov ecx, 64000
-    xor al, al
-    rep stosb
-
-    ; Dark blue desktop fill
-    mov edi, 0xA0000
-    mov ecx, 60800
-    mov al, 1
-    rep stosb
-
-    ; Cyan top bar (row 0-9)
-    mov edi, 0xA0000
-    mov ecx, 3200
-    mov al, 3
-    rep stosb
-
-    ; Gray taskbar bottom
-    mov edi, 0xA0000 + 60800
-    mov ecx, 3200
-    mov al, 8
-    rep stosb
-
-    ; White start button area
-    mov edi, 0xA0000 + 60820
-    mov ecx, 400
-    mov al, 15
-    rep stosb
-
-    ; Yellow icon 1
-    mov edi, 0xA0000 + 6500
-    mov ecx, 400
-    mov al, 14
-    rep stosb
-
-    ; Green icon 2
-    mov edi, 0xA0000 + 9500
-    mov ecx, 400
-    mov al, 10
-    rep stosb
-
-    ; Red icon 3
-    mov edi, 0xA0000 + 12500
-    mov ecx, 400
-    mov al, 12
-    rep stosb
-
-    ; === RENDER TEXT ON DESKTOP ===
-    mov esi, gui_title
-    mov ebx, 96
-    mov ecx, 1
-    mov dl, 15
-    call draw_text
-
-    mov esi, lbl_files
-    mov ebx, 18
-    mov ecx, 38
-    mov dl, 15
-    call draw_text
-
-    mov esi, lbl_term
-    mov ebx, 0
-    mov ecx, 53
-    mov dl, 11
-    call draw_text
-
-    mov esi, lbl_set
-    mov ebx, 2
-    mov ecx, 68
-    mov dl, 14
-    call draw_text
-
-    mov esi, lbl_esc
-    mov ebx, 80
-    mov ecx, 191
-    mov dl, 7
-    call draw_text
-
-    ; Poll for ESC key (scancode 0x81 = ESC release)
-.gui_poll:
-    in al, 0x64
-    test al, 0x01  ; output buffer full?
-    jz .gui_poll
+    ; Read controller command byte
+    mov al, 0x20
+    out 0x64, al
     in al, 0x60
-    cmp al, 0x01   ; ESC press
-    jne .gui_poll
+    or al, 0x02    ; enable IRQ12 mouse interrupt
+    and al, 0xDF   ; enable mouse clock (clear bit 5)
+    push eax
+    mov al, 0x60
+    out 0x64, al
+    pop eax
+    out 0x60, al
 
+    ; Tell mouse to enable packet streaming
+    mov al, 0xD4
+    out 0x64, al
+    mov al, 0xF4
+    out 0x60, al
+    in al, 0x60    ; read acknowledgment (0xFA)
+
+    ; Reset GUI variables
+    mov dword [mouse_x], 160
+    mov dword [mouse_y], 100
+    mov byte [mouse_cycle], 0
+    mov byte [last_mouse_buttons], 0
+    mov byte [files_open], 0
+    mov byte [desktop_win_open], 1
+
+    ; Initial redraw
+    call redraw_desktop_pm
+
+    ; === MAIN GUI LOOP (POLLING DRIVEN WITH CLI) ===
+.gui_frame_loop:
+    ; 1. Drain the input queue first
+.input_loop:
+    in al, 0x64
+    test al, 0x01       ; Output buffer full?
+    jz .render_frame    ; If no more input, render frame!
+
+    test al, 0x20       ; bit 5 = mouse data
+    jnz .mouse_data
+
+    ; Keyboard data
+    in al, 0x60
+    cmp al, 0x01        ; ESC press?
+    je .exit_gui
+    jmp .input_loop
+
+.mouse_data:
+    in al, 0x60
+    
+    ; Process byte based on current packet cycle (0, 1, 2)
+    movzx ecx, byte [mouse_cycle]
+    cmp ecx, 0
+    je .cycle0
+    cmp ecx, 1
+    je .cycle1
+    cmp ecx, 2
+    je .cycle2
+    jmp .input_loop
+
+.cycle0:
+    test al, 0x08       ; sync bit check
+    jz .input_loop      ; out of sync, drop byte
+    mov [mouse_byte0], al
+    inc byte [mouse_cycle]
+    jmp .input_loop
+
+.cycle1:
+    mov [mouse_byte1], al
+    inc byte [mouse_cycle]
+    jmp .input_loop
+
+.cycle2:
+    mov [mouse_byte2], al
+    mov byte [mouse_cycle], 0
+
+    ; Full packet received!
+    mov al, [mouse_byte0]
+    mov bl, al          ; BL = buttons
+
+    ; Process X movement
+    movzx ecx, byte [mouse_byte1]
+    test al, 0x10       ; negative delta X? (bit 4)
+    jz .x_pos
+    or ecx, 0xFFFFFF00
+.x_pos:
+    add [mouse_x], ecx
+
+    ; Process Y movement (Y axis inverted in PS/2 relative to screen)
+    movzx edx, byte [mouse_byte2]
+    test al, 0x20       ; negative delta Y? (bit 5)
+    jz .y_pos
+    or edx, 0xFFFFFF00
+.y_pos:
+    sub [mouse_y], edx  ; subtract since screen Y increases downwards
+
+    ; Clamp X (0..319)
+    cmp dword [mouse_x], 0
+    jge .chk_x_max
+    mov dword [mouse_x], 0
+    jmp .clamp_y
+.chk_x_max:
+    cmp dword [mouse_x], 319
+    jle .clamp_y
+    mov dword [mouse_x], 319
+
+.clamp_y:
+    ; Clamp Y (0..199)
+    cmp dword [mouse_y], 0
+    jge .chk_y_max
+    mov dword [mouse_y], 0
+    jmp .chk_clicks
+.chk_y_max:
+    cmp dword [mouse_y], 199
+    jle .chk_clicks
+    mov dword [mouse_y], 199
+
+.chk_clicks:
+    ; Click transition detection (Left click bit 0)
+    mov al, bl
+    and al, 1           ; current left
+    mov ah, [last_mouse_buttons]
+    and ah, 1           ; last left
+    mov [last_mouse_buttons], bl
+
+    cmp al, 1
+    jne .input_loop
+    cmp ah, 0
+    jne .input_loop
+
+    ; Fresh left click! Check hitboxes
+    mov ecx, [mouse_x]
+    mov edx, [mouse_y]
+
+    ; 1. Files Icon hitbox: X in 10..40, Y in 60..90 (green icon at Y=65)
+    cmp ecx, 10
+    jl .check_welcome_win_close
+    cmp ecx, 40
+    jg .check_welcome_win_close
+    cmp edx, 60
+    jl .check_welcome_win_close
+    cmp edx, 90
+    jg .check_welcome_win_close
+    mov byte [files_open], 1
+    mov byte [desktop_win_open], 0  ; auto-close welcome when FILES opens
+    jmp .input_loop
+
+.check_welcome_win_close:
+    ; 2. Welcome Window close button hitbox if open
+    cmp byte [desktop_win_open], 1
+    jne .check_files_win_close
+    ; Welcome window: X=80, Y=20, width=190, height=95
+    ; Close button: win_x + win_w - 11 = 259..265, win_y + 3 = 23..29
+    cmp ecx, 259
+    jl .check_files_win_close
+    cmp ecx, 265
+    jg .check_files_win_close
+    cmp edx, 23
+    jl .check_files_win_close
+    cmp edx, 29
+    jg .check_files_win_close
+    mov byte [desktop_win_open], 0
+    jmp .input_loop
+
+.check_files_win_close:
+    ; 3. Files Window close button hitbox if open
+    cmp byte [files_open], 1
+    jne .input_loop
+    ; Files window: X=30, Y=20, width=260, height=140
+    ; Close button: win_x + win_w - 11 = 279..285, win_y + 3 = 23..29
+    cmp ecx, 279
+    jl .input_loop
+    cmp ecx, 285
+    jg .input_loop
+    cmp edx, 23
+    jl .input_loop
+    cmp edx, 29
+    jg .input_loop
+    mov byte [files_open], 0
+    jmp .input_loop
+
+.render_frame:
+    ; Redraw everything to the backbuffer and copy to VGA screen
+    call redraw_desktop_pm
+
+    ; Wait a bit (approx 10-15ms for smooth stable framerate)
+    mov ecx, 0x8000
+.delay:
+    dec ecx
+    jnz .delay
+    jmp .gui_frame_loop
+
+.exit_gui:
     ; === RESTORE TEXT MODE 3 ===
     cli
     mov al, 0x67
@@ -604,82 +710,13 @@ do_gui:
     mov dword [cur_col], 0
     jmp dispatch_done
 
-; ==========================================
-; BITMAP FONT RENDERER (8x8 pixels/char)
-; ==========================================
-; draw_char: EBX=x, ECX=y, AL=char, AH=color
-draw_char:
-    mov [dc_char],  al
-    mov [dc_color], ah
-    mov [dc_basex], ebx
-    mov [dc_basey], ecx
-    pushad                      ; save ALL registers (fixes esi corruption in draw_text)
-    movzx eax, byte [dc_char]
-    sub eax, 32
-    jl .dc_exit
-    shl eax, 3
-    add eax, font8x8
-    mov [dc_glyph], eax     ; pointer to 8-byte glyph
-
-    mov dword [dc_row], 0
-.dc_row:
-    cmp dword [dc_row], 8
-    jge .dc_exit
-
-    mov esi, [dc_glyph]
-    mov ecx, [dc_row]
-    movzx eax, byte [esi + ecx]  ; glyph row byte
-    mov [dc_bits], al
-
-    mov dword [dc_col], 0
-.dc_col:
-    cmp dword [dc_col], 8
-    jge .dc_next_row
-
-    mov al, [dc_bits]
-    test al, 0x80
-    jz .dc_skip
-
-    ; pixel_addr = (basey+row)*320 + basex+col + 0xA0000
-    mov eax, [dc_basey]
-    add eax, [dc_row]
-    imul eax, eax, 320
-    add eax, [dc_basex]
-    add eax, [dc_col]
-    add eax, 0xA0000
-    movzx ebx, byte [dc_color]
-    mov [eax], bl
-
-.dc_skip:
-    mov al, [dc_bits]
-    shl al, 1
-    mov [dc_bits], al
-    inc dword [dc_col]
-    jmp .dc_col
-
-.dc_next_row:
-    inc dword [dc_row]
-    jmp .dc_row
-
-.dc_exit:
-    popad                       ; restore all registers including esi
-    ret
-
-; draw_text: ESI=str, EBX=x, ECX=y, DL=color
-draw_text:
-    pushad
-.dt_loop:
-    mov al, [esi]
-    or al, al
-    jz .dt_done
-    mov ah, dl
-    call draw_char
-    add ebx, 8
-    inc esi
-    jmp .dt_loop
-.dt_done:
-    popad
-    ret
+; =============================================
+; GUI SUBSYSTEM (modular includes)
+; =============================================
+%include "gui/graphics.asm"    ; draw_rect_pm, draw_window_pm, draw_char, draw_text, font8x8
+%include "gui/mouse.asm"       ; mouse_x/y, mouse_cycle, mouse_byte*, last_mouse_buttons
+%include "gui/window.asm"      ; draw_cursor_pm, draw_files_window, window state + data
+%include "gui/desktop.asm"     ; redraw_desktop_pm, desktop labels
 
 dispatch_done:
     call new_line
@@ -687,7 +724,7 @@ dispatch_done:
     ret
 
 ; =============================================
-; STRCMP32: ESI vs EDI, ZF=1 if match
+; STRCMP32: ESI vs EDI, ZF=1 if equal
 ; =============================================
 strcmp32:
     push eax
@@ -705,12 +742,12 @@ strcmp32:
 .match:
     pop ebx
     pop eax
-    xor eax, eax    ; ZF=1
+    xor eax, eax
     ret
 .fail:
     pop ebx
     pop eax
-    or eax, 1       ; ZF=0
+    or eax, 1
     ret
 
 ; =============================================
@@ -746,24 +783,20 @@ keyboard_isr:
     or al, al
     jz .kb_eoi
 
-    cmp al, 0x08    ; Backspace
+    cmp al, 0x08
     je .backspace
-
-    cmp al, 0x0A    ; Enter
+    cmp al, 0x0A
     je .enter
 
-    ; Add char to buffer if room
     mov ecx, [buf_len]
     cmp ecx, 79
     jge .kb_eoi
 
-    ; Store in buffer
     mov ebx, 0x3000
     add ebx, ecx
     mov [ebx], al
     inc dword [buf_len]
 
-    ; Echo to screen
     mov ah, 0x0F
     call put_char_raw
     jmp .kb_eoi
@@ -773,12 +806,10 @@ keyboard_isr:
     cmp ecx, 0
     je .kb_eoi
     dec dword [buf_len]
-    ; Remove from buffer
     mov ebx, 0x3000
     add ebx, ecx
     dec ebx
     mov byte [ebx], 0
-    ; Erase from screen
     mov eax, [cur_col]
     cmp eax, 0
     je .kb_eoi
@@ -793,13 +824,11 @@ keyboard_isr:
     jmp .kb_eoi
 
 .enter:
-    ; Null-terminate buffer
     mov ecx, [buf_len]
     mov ebx, 0x3000
     add ebx, ecx
     mov byte [ebx], 0
     call new_line
-    ; Dispatch if non-empty
     cmp dword [buf_len], 0
     je .empty_enter
     call dispatch_command
@@ -807,7 +836,6 @@ keyboard_isr:
 .empty_enter:
     call print_prompt
 .clear_buf:
-    ; Clear buffer
     mov edi, 0x3000
     mov ecx, 80
     xor al, al
@@ -822,18 +850,18 @@ keyboard_isr:
     iret
 
 ; =============================================
-; DATA
+; KERNEL CORE DATA
 ; =============================================
-cur_row   dd 2
-cur_col   dd 0
-buf_len   dd 0
-idt_limit dw 0
-idt_base  dd 0
+cur_row     dd 2
+cur_col     dd 0
+buf_len     dd 0
+idt_limit   dw 0
+idt_base    dd 0
 
 title_str   db '  SQ-OS  |  32-BIT PROTECTED MODE SHELL  ', 0
 prompt_str  db 'SQ> ', 0
 err_str     db 'Unknown command. Type help.', 0
-help_str    db 'Commands: help  clear  about  version  reboot', 0
+help_str    db 'Commands: help  clear  about  version  reboot  gui', 0
 about_str   db 'SQ-OS | 32-bit Protected Mode | IRQ-driven Shell | by Harsh', 0
 version_str db 'SQ-OS v2.0 | Kernel: pmode-32 | Arch: x86 PM | Build: 2026', 0
 
@@ -844,108 +872,25 @@ cmd_version db 'version', 0
 cmd_gui     db 'gui', 0
 cmd_reboot  db 'reboot', 0
 
-; Mode 13h CRTC register pairs (index, value)
+; VGA Mode 13h register tables
 crtc13h:
     db 0x00,0x5F, 0x01,0x4F, 0x02,0x50, 0x03,0x82, 0x04,0x54
     db 0x05,0x80, 0x06,0xBF, 0x07,0x1F, 0x08,0x00, 0x09,0x41
     db 0x0A,0x00, 0x0B,0x00, 0x0C,0x00, 0x0D,0x00, 0x10,0x9C
     db 0x11,0x8E, 0x12,0x8F, 0x13,0x28, 0x14,0x40, 0x15,0x96
     db 0x16,0xB9, 0x17,0xA3, 0x18,0xFF, 0x0E,0x00, 0x0F,0x00
-
-; Mode 13h GC register pairs
 gc13h:
     db 0x00,0x00, 0x01,0x00, 0x02,0x00, 0x03,0x00, 0x04,0x00
     db 0x05,0x40, 0x06,0x05, 0x07,0x0F, 0x08,0xFF
-
-; Mode 13h AC register pairs (index|0x20, value)
 ac13h:
     db 0x00,0x00, 0x01,0x01, 0x02,0x02, 0x03,0x03, 0x04,0x04
     db 0x05,0x05, 0x06,0x06, 0x07,0x07, 0x08,0x08, 0x09,0x09
     db 0x0A,0x0A, 0x0B,0x0B, 0x0C,0x0C, 0x0D,0x0D, 0x0E,0x0E
     db 0x0F,0x0F, 0x10,0x41, 0x11,0x00, 0x12,0x0F, 0x13,0x00
     db 0x14,0x00
-
-; Text mode GC pairs
 gctext:
     db 0x00,0x00, 0x01,0x00, 0x02,0x00, 0x03,0x00, 0x04,0x00
     db 0x05,0x10, 0x06,0x0E, 0x07,0x00, 0x08,0xFF
-
-dc_color db 0
-dc_char  db 0
-dc_bits  db 0
-dc_basex dd 0
-dc_basey dd 0
-dc_glyph dd 0
-dc_row   dd 0
-dc_col   dd 0
-
-gui_title db 'SQ-OS DESKTOP v2.0',0
-lbl_files db 'FILES',0
-lbl_term  db 'TERMINAL',0
-lbl_set   db 'SETTINGS',0
-lbl_esc   db 'ESC=SHELL',0
-
-; 8x8 bitmap font, ASCII 32-90
-font8x8:
-    db 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 ; 32 SPACE
-    db 0x18,0x18,0x18,0x18,0x00,0x18,0x00,0x00 ; 33 !
-    db 0x66,0x66,0x44,0x00,0x00,0x00,0x00,0x00 ; 34 "
-    db 0x24,0x7E,0x24,0x24,0x7E,0x24,0x00,0x00 ; 35 #
-    db 0x7C,0x12,0x7C,0x48,0x7C,0x00,0x00,0x00 ; 36 $
-    db 0x62,0x64,0x08,0x10,0x26,0x46,0x00,0x00 ; 37 %
-    db 0x1C,0x22,0x1C,0x2A,0x44,0x3A,0x00,0x00 ; 38 &
-    db 0x0C,0x08,0x10,0x00,0x00,0x00,0x00,0x00 ; 39 '
-    db 0x0C,0x10,0x20,0x20,0x20,0x10,0x0C,0x00 ; 40 (
-    db 0x30,0x08,0x04,0x04,0x04,0x08,0x30,0x00 ; 41 )
-    db 0x00,0x24,0x18,0x7E,0x18,0x24,0x00,0x00 ; 42 *
-    db 0x00,0x10,0x10,0x7C,0x10,0x10,0x00,0x00 ; 43 +
-    db 0x00,0x00,0x00,0x00,0x18,0x18,0x10,0x20 ; 44 ,
-    db 0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00 ; 45 -
-    db 0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00 ; 46 .
-    db 0x02,0x04,0x08,0x10,0x20,0x40,0x00,0x00 ; 47 /
-    db 0x3C,0x42,0x46,0x4A,0x52,0x62,0x3C,0x00 ; 48 0
-    db 0x18,0x28,0x08,0x08,0x08,0x08,0x3C,0x00 ; 49 1
-    db 0x3C,0x42,0x02,0x0C,0x30,0x40,0x7E,0x00 ; 50 2
-    db 0x7E,0x02,0x04,0x1C,0x02,0x42,0x3C,0x00 ; 51 3
-    db 0x08,0x18,0x28,0x48,0x7E,0x08,0x08,0x00 ; 52 4
-    db 0x7E,0x40,0x7C,0x02,0x02,0x42,0x3C,0x00 ; 53 5
-    db 0x1C,0x20,0x40,0x7C,0x42,0x42,0x3C,0x00 ; 54 6
-    db 0x7E,0x02,0x04,0x08,0x10,0x10,0x10,0x00 ; 55 7
-    db 0x3C,0x42,0x42,0x3C,0x42,0x42,0x3C,0x00 ; 56 8
-    db 0x3C,0x42,0x42,0x3E,0x02,0x04,0x38,0x00 ; 57 9
-    db 0x00,0x18,0x18,0x00,0x18,0x18,0x00,0x00 ; 58 :
-    db 0x00,0x18,0x18,0x00,0x18,0x10,0x20,0x00 ; 59 ;
-    db 0x04,0x08,0x10,0x20,0x10,0x08,0x04,0x00 ; 60 <
-    db 0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00 ; 61 =
-    db 0x20,0x10,0x08,0x04,0x08,0x10,0x20,0x00 ; 62 >
-    db 0x3C,0x42,0x04,0x08,0x00,0x08,0x00,0x00 ; 63 ?
-    db 0x3C,0x42,0x4E,0x52,0x4E,0x40,0x3C,0x00 ; 64 @
-    db 0x18,0x24,0x42,0x42,0x7E,0x42,0x42,0x00 ; 65 A
-    db 0x7C,0x42,0x42,0x7C,0x42,0x42,0x7C,0x00 ; 66 B
-    db 0x3C,0x42,0x40,0x40,0x40,0x42,0x3C,0x00 ; 67 C
-    db 0x78,0x44,0x42,0x42,0x42,0x44,0x78,0x00 ; 68 D
-    db 0x7E,0x40,0x40,0x78,0x40,0x40,0x7E,0x00 ; 69 E
-    db 0x7E,0x40,0x40,0x78,0x40,0x40,0x40,0x00 ; 70 F
-    db 0x3C,0x42,0x40,0x4E,0x42,0x42,0x3C,0x00 ; 71 G
-    db 0x42,0x42,0x42,0x7E,0x42,0x42,0x42,0x00 ; 72 H
-    db 0x3E,0x08,0x08,0x08,0x08,0x08,0x3E,0x00 ; 73 I
-    db 0x04,0x04,0x04,0x04,0x04,0x44,0x38,0x00 ; 74 J
-    db 0x42,0x44,0x48,0x70,0x48,0x44,0x42,0x00 ; 75 K
-    db 0x40,0x40,0x40,0x40,0x40,0x40,0x7E,0x00 ; 76 L
-    db 0x42,0x66,0x5A,0x42,0x42,0x42,0x42,0x00 ; 77 M
-    db 0x42,0x62,0x52,0x4A,0x46,0x42,0x42,0x00 ; 78 N
-    db 0x3C,0x42,0x42,0x42,0x42,0x42,0x3C,0x00 ; 79 O
-    db 0x7C,0x42,0x42,0x7C,0x40,0x40,0x40,0x00 ; 80 P
-    db 0x3C,0x42,0x42,0x42,0x4A,0x44,0x3A,0x00 ; 81 Q
-    db 0x7C,0x42,0x42,0x7C,0x48,0x44,0x42,0x00 ; 82 R
-    db 0x3C,0x42,0x40,0x3C,0x02,0x42,0x3C,0x00 ; 83 S
-    db 0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00 ; 84 T
-    db 0x42,0x42,0x42,0x42,0x42,0x42,0x3C,0x00 ; 85 U
-    db 0x42,0x42,0x42,0x42,0x42,0x24,0x18,0x00 ; 86 V
-    db 0x42,0x42,0x42,0x42,0x5A,0x66,0x42,0x00 ; 87 W
-    db 0x42,0x24,0x24,0x18,0x24,0x24,0x42,0x00 ; 88 X
-    db 0x42,0x42,0x24,0x18,0x18,0x18,0x18,0x00 ; 89 Y
-    db 0x7E,0x04,0x08,0x10,0x20,0x40,0x7E,0x00 ; 90 Z
 
 scancode_map:
     db 0, 27
