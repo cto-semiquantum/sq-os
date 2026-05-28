@@ -133,4 +133,5 @@ SQ-OS/
 ## Author
 
 **Harsh Jha** — SemiQuantum  
+
 Built from scratch. No shortcuts.

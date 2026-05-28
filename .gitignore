@@ -1,0 +1,7 @@
+# Build outputs
+*.bin
+*.o
+*.img
+*.lst
+*.map
+null
