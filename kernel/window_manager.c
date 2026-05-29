@@ -40,10 +40,10 @@ void init_windows(void) {
     window_files.color = 7;
 
     // Terminal Window
-    window_terminal.x = 50;
+    window_terminal.x = 30;
     window_terminal.y = 45;
-    window_terminal.w = 200;
-    window_terminal.h = 105;
+    window_terminal.w = 260;
+    window_terminal.h = 130;
     window_terminal.title = "TERMINAL";
     window_terminal.visible = 0;
     window_terminal.active = 0;

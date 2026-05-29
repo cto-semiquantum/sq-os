@@ -1,5 +1,7 @@
 #include "kernel.h"
 #include "desktop.h"
+#include "graphics.h"
+#include "memory.h"
 
 #define VIDEO_MEM ((volatile uint16_t *)0xB8000)
 #define MAX_ROWS 25
@@ -334,11 +336,8 @@ void restore_text_mode(void) {
 }
 
 void draw_splash_frame(int percent) {
-    // Clear backbuffer to 0 (black)
-    uint32_t *buf = (uint32_t *)BACKBUFFER_ADDR;
-    for (int i = 0; i < 16000; i++) {
-        buf[i] = 0;
-    }
+    // Clear backbuffer to black
+    clear_backbuffer();
 
     // Centered retro dialog card (light gray body, 240x140 at (40, 20))
     int card_x = 40;
@@ -390,6 +389,9 @@ void draw_splash_frame(int percent) {
 }
 
 void kernel_main(void) {
+    // 0. Initialise kernel heap (must be first)
+    heap_init();
+
     // 1. Immediately transition to VGA graphics mode 13h
     init_vga_mode13();
 

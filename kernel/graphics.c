@@ -2,6 +2,14 @@
 
 uint8_t *draw_buffer = (uint8_t *)BACKBUFFER_ADDR;
 
+/* clear_backbuffer — zero the entire 320x200 backbuffer (16000 dwords) */
+void clear_backbuffer(void) {
+    uint32_t *buf = (uint32_t *)BACKBUFFER_ADDR;
+    for (int i = 0; i < 16000; i++) {
+        buf[i] = 0;
+    }
+}
+
 // 8x8 bitmap font, ASCII 32-90
 static const uint8_t font8x8[59 * 8] = {
     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, // 32 SPACE
@@ -129,6 +137,44 @@ void draw_char(int x, int y, char c, uint8_t color) {
 void draw_text(int x, int y, const char *str, uint8_t color) {
     while (*str) {
         draw_char(x, y, *str, color);
+        x += 8;
+        str++;
+    }
+}
+
+void draw_char_clipped(int x, int y, char c, uint8_t color, int min_x, int max_x, int min_y, int max_y) {
+    if (c >= 'a' && c <= 'z') {
+        c -= 32;
+    }
+    if (c < 32 || c > 90) return;
+
+    int glyph_idx = c - 32;
+    const uint8_t *glyph = &font8x8[glyph_idx * 8];
+
+    for (int r = 0; r < 8; r++) {
+        int cy = y + r;
+        if (cy < min_y || cy >= max_y || cy < 0 || cy >= VGA_HEIGHT) continue;
+
+        uint8_t row_data = glyph[r];
+        uint8_t *dest = &draw_buffer[cy * VGA_WIDTH];
+
+        for (int col = 0; col < 8; col++) {
+            int cx = x + col;
+            if (cx < min_x || cx >= max_x || cx < 0 || cx >= VGA_WIDTH) continue;
+
+            if (row_data & (0x80 >> col)) {
+                dest[cx] = color;
+            }
+        }
+    }
+}
+
+void draw_text_clipped(int x, int y, const char *str, uint8_t color, int min_x, int max_x, int min_y, int max_y) {
+    while (*str) {
+        if (x >= max_x) break;
+        if (x + 8 > min_x) {
+            draw_char_clipped(x, y, *str, color, min_x, max_x, min_y, max_y);
+        }
         x += 8;
         str++;
     }

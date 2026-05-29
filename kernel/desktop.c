@@ -1,6 +1,7 @@
 #include "desktop.h"
 #include "terminal_app.h"
 #include "rtc.h"
+#include "wallpaper.h"
 
 static void draw_icon_box(int x, int y, uint8_t color) {
     draw_rect(x, y, 10, 10, color);
@@ -79,14 +80,11 @@ void draw_settings_content(Window *win) {
 
 // Redraw entire desktop
 void redraw_desktop(void) {
-    // 1. Clear backbuffer to 0 (black)
-    uint32_t *buf = (uint32_t *)BACKBUFFER_ADDR;
-    for (int i = 0; i < 16000; i++) {
-        buf[i] = 0;
-    }
+    // 1. Clear backbuffer to black
+    clear_backbuffer();
 
-    // 2. Desktop background (blue, Y=10..189)
-    draw_rect(0, 10, 320, 180, 1);
+    // 2. Wallpaper background (retro gradient — covers full 320x200)
+    render_wallpaper();
 
     // 3. Top bar (cyan, Y=0..9)
     draw_rect(0, 0, 320, 10, 3);

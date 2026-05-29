@@ -1,10 +1,28 @@
 #include "terminal_app.h"
+#include "../fs/fat12.h"
+#include "memory.h"
+#include "loader.h"
 
-char term_input[64];
+/* ============================================================
+ * Terminal State
+ * ============================================================ */
+char     term_input[TERM_INPUT_MAX + 2];
 uint32_t term_input_len = 0;
-char term_history[5][32];
 
-// Local Keyboard Scancode-to-ASCII map
+/* Output history — circular, 8 lines of 40 chars */
+char term_history[TERM_HISTORY_LINES][TERM_HISTORY_LEN];
+
+/* Command recall history (Up/Down arrow) */
+static char   cmd_hist[TERM_CMD_HIST_SIZE][TERM_INPUT_MAX + 1];
+static int    cmd_hist_count = 0;   /* total entries stored          */
+static int    cmd_hist_idx   = -1;  /* -1 = not browsing history     */
+
+/* Blinking cursor tick (toggled each frame via draw_terminal_content) */
+static int cursor_blink_tick = 0;
+
+/* ============================================================
+ * Keyboard Scancode → ASCII (identical map to kernel.c)
+ * ============================================================ */
 static const char scancode_map[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
     '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
@@ -13,12 +31,13 @@ static const char scancode_map[128] = {
     '*', 0, ' '
 };
 
-static int strcmp(const char *s1, const char *s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
+/* ============================================================
+ * Internal string helpers (no libc)
+ * ============================================================ */
+static int str_len(const char *s) {
+    int n = 0;
+    while (s[n]) n++;
+    return n;
 }
 
 static void str_copy(char *dest, const char *src, int max_len) {
@@ -30,118 +49,387 @@ static void str_copy(char *dest, const char *src, int max_len) {
     dest[i] = '\0';
 }
 
+static int str_eq(const char *a, const char *b) {
+    while (*a && *b && *a == *b) { a++; b++; }
+    return (*a == '\0' && *b == '\0');
+}
+
+/* Returns 1 if str starts with prefix */
+static int str_starts_with(const char *str, const char *prefix) {
+    while (*prefix) {
+        if (*str != *prefix) return 0;
+        str++; prefix++;
+    }
+    return 1;
+}
+
+/* Convert uint32_t to decimal string, returns length */
+static int u32_to_dec(uint32_t val, char *out) {
+    if (val == 0) { out[0]='0'; out[1]='\0'; return 1; }
+    char tmp[12]; int n = 0;
+    while (val > 0) { tmp[n++] = '0' + (val % 10); val /= 10; }
+    for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+    out[n] = '\0';
+    return n;
+}
+
+/* ============================================================
+ * Output history helpers
+ * ============================================================ */
+
+/* append_history — scroll all lines up by one, place new line at bottom */
+void append_history(const char *line) {
+    for (int i = 0; i < TERM_HISTORY_LINES - 1; i++) {
+        str_copy(term_history[i], term_history[i + 1], TERM_HISTORY_LEN);
+    }
+    str_copy(term_history[TERM_HISTORY_LINES - 1], line, TERM_HISTORY_LEN);
+}
+
+/* ============================================================
+ * Command recall history
+ * ============================================================ */
+static void push_cmd_hist(const char *cmd) {
+    if (cmd[0] == '\0') return; /* don't save empty lines */
+    /* Shift entries up, drop the oldest if full */
+    if (cmd_hist_count < TERM_CMD_HIST_SIZE) cmd_hist_count++;
+    for (int i = cmd_hist_count - 1; i > 0; i--) {
+        str_copy(cmd_hist[i], cmd_hist[i-1], TERM_INPUT_MAX + 1);
+    }
+    str_copy(cmd_hist[0], cmd, TERM_INPUT_MAX + 1);
+    cmd_hist_idx = -1;
+}
+
+/* ============================================================
+ * init_terminal_app
+ * ============================================================ */
 void init_terminal_app(void) {
     term_input_len = 0;
-    term_input[0] = '\0';
+    term_input[0]  = '\0';
+    cmd_hist_count = 0;
+    cmd_hist_idx   = -1;
 
-    // Clear history to blank strings
-    for (int i = 0; i < 5; i++) {
+    /* Clear all history lines */
+    for (int i = 0; i < TERM_HISTORY_LINES; i++) {
         term_history[i][0] = '\0';
     }
 
-    // Set greeting lines
-    str_copy(term_history[2], "SQ-OS Terminal v2.0", 32);
-    str_copy(term_history[3], "Arch: 32-bit Protected Mode", 32);
-    str_copy(term_history[4], "Type HELP for commands", 32);
+    /* Greeting messages */
+    append_history("SQ-OS Terminal v3.0");
+    append_history("32-bit Protected Mode");
+    append_history("Type HELP for commands");
+    append_history("");
 }
 
-void append_history(const char *line) {
-    // Scroll previous history lines up (0 gets overwritten, 1->0, 2->1, 3->2, 4->3)
-    for (int i = 0; i < 4; i++) {
-        str_copy(term_history[i], term_history[i + 1], 32);
-    }
-    // Copy new line to the last row (line 4)
-    str_copy(term_history[4], line, 32);
-}
-
+/* ============================================================
+ * terminal_execute_command
+ * ============================================================ */
 void terminal_execute_command(const char *cmd) {
-    // 1. Construct prompt command line and append it to history
-    char cmd_line[32];
-    str_copy(cmd_line, "SQ> ", 32);
-    // Append command to "SQ> "
-    int len = 4;
-    while (cmd[len - 4] != '\0' && len < 31) {
-        cmd_line[len] = cmd[len - 4];
-        len++;
+    /* Show the entered command with prompt prefix */
+    char cmd_line[TERM_HISTORY_LEN];
+    str_copy(cmd_line, "SQ> ", TERM_HISTORY_LEN);
+    int offset = str_len("SQ> ");
+    int i = 0;
+    while (cmd[i] != '\0' && offset + i < TERM_HISTORY_LEN - 1) {
+        cmd_line[offset + i] = cmd[i];
+        i++;
     }
-    cmd_line[len] = '\0';
+    cmd_line[offset + i] = '\0';
     append_history(cmd_line);
 
-    // 2. Parse and execute command
-    if (strcmp(cmd, "help") == 0) {
-        append_history("Commands: HELP, ABOUT,");
-        append_history("VERSION, CLEAR, REBOOT");
-    } else if (strcmp(cmd, "about") == 0) {
+    /* --- Command dispatch --- */
+    if (str_eq(cmd, "help")) {
+        append_history("HELP ABOUT VERSION");
+        append_history("CLEAR MEM HEAP FILES");
+        append_history("APPS  RUN <name>");
+        append_history("REBOOT");
+
+    } else if (str_eq(cmd, "about")) {
         append_history("SQ-OS by Harsh");
-        append_history("Freestanding hybrid C kernel");
-    } else if (strcmp(cmd, "version") == 0) {
-        append_history("SQ-OS v2.0 (Hybrid C+ASM)");
-    } else if (strcmp(cmd, "clear") == 0) {
-        for (int i = 0; i < 5; i++) {
-            term_history[i][0] = '\0';
+        append_history("Hybrid C+ASM kernel");
+
+    } else if (str_eq(cmd, "version")) {
+        append_history("SQ-OS v3.0");
+        append_history("Kernel: hybrid-c-asm");
+
+    } else if (str_eq(cmd, "clear")) {
+        for (int j = 0; j < TERM_HISTORY_LINES; j++) {
+            term_history[j][0] = '\0';
         }
-    } else if (strcmp(cmd, "reboot") == 0) {
+
+    } else if (str_eq(cmd, "mem") || str_eq(cmd, "heap")) {
+        /* Pull full heap statistics */
+        HeapStats st;
+        heap_stats(&st);
+
+        /* Helper: build "Label: NNN B" into a history line */
+        char ln[TERM_HISTORY_LEN];
+        char num[12];
+
+        /* Line 1: Used */
+        str_copy(ln, "Used:  ", TERM_HISTORY_LEN);
+        u32_to_dec(st.used_bytes, num);
+        int p = str_len(ln);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-3; j++) ln[p++]=num[j];
+        ln[p++]='B'; ln[p]=0;
+        append_history(ln);
+
+        /* Line 2: Free */
+        str_copy(ln, "Free:  ", TERM_HISTORY_LEN);
+        u32_to_dec(st.free_bytes, num);
+        p = str_len(ln);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-3; j++) ln[p++]=num[j];
+        ln[p++]='B'; ln[p]=0;
+        append_history(ln);
+
+        /* Line 3: Total */
+        str_copy(ln, "Total: ", TERM_HISTORY_LEN);
+        u32_to_dec(st.total_bytes, num);
+        p = str_len(ln);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-3; j++) ln[p++]=num[j];
+        ln[p++]='B'; ln[p]=0;
+        append_history(ln);
+
+        /* Line 4: Blocks live / alloc / free */
+        str_copy(ln, "Blk: ", TERM_HISTORY_LEN);
+        u32_to_dec(st.block_count, num);
+        p = str_len(ln);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-12; j++) ln[p++]=num[j];
+        /* append " A:N F:N" */
+        ln[p++]=' '; ln[p++]='A'; ln[p++]=':';
+        u32_to_dec(st.alloc_count, num);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-6; j++) ln[p++]=num[j];
+        ln[p++]=' '; ln[p++]='F'; ln[p++]=':';
+        u32_to_dec(st.free_count, num);
+        for (int j = 0; num[j] && p < TERM_HISTORY_LEN-2; j++) ln[p++]=num[j];
+        ln[p]=0;
+        append_history(ln);
+
+    } else if (str_eq(cmd, "files")) {
+        /* List root directory via FAT12 */
+        append_history("Disk: reading...");
+        if (fat12_init() != 0) {
+            append_history("ERR: No FAT12 disk");
+        } else {
+            DirEntry entries[FAT12_MAX_FILES];
+            int count = fat12_list_root(entries, FAT12_MAX_FILES);
+            if (count == 0) {
+                append_history("Root dir is empty");
+            } else {
+                for (int j = 0; j < count && j < 4; j++) {
+                    /* Format: "NAME    .EXT" */
+                    char line[TERM_HISTORY_LEN];
+                    int p = 0;
+                    for (int k = 0; k < 8 && entries[j].name[k] != ' '; k++) {
+                        line[p++] = entries[j].name[k];
+                    }
+                    if (entries[j].ext[0] != ' ') {
+                        line[p++] = '.';
+                        for (int k = 0; k < 3 && entries[j].ext[k] != ' '; k++) {
+                            line[p++] = entries[j].ext[k];
+                        }
+                    }
+                    line[p] = '\0';
+                    append_history(line);
+                }
+                if (count > 4) append_history("... (more files)");
+            }
+        }
+
+    } else if (str_eq(cmd, "apps")) {
+        /* List available programs from app directory */
+        char names[8][13];
+        int  count = loader_list_apps(names, 8);
+        if (count <= 0) {
+            append_history("No apps on disk");
+            append_history("Run build.bat first");
+        } else {
+            append_history("Installed apps:");
+            for (int j = 0; j < count; j++) {
+                append_history(names[j]);
+            }
+        }
+
+    } else if (str_starts_with(cmd, "run ")) {
+        /* Load and execute program: run hello.app */
+        const char *app_name = cmd + 4; /* skip "run " */
+        if (app_name[0] == '\0') {
+            append_history("Usage: run <name>");
+            append_history("e.g.  run hello.app");
+        } else {
+            char out[APP_OUT_BUF_SIZE];
+            append_history("Loading...");
+            int result = load_program(app_name, out, APP_OUT_BUF_SIZE);
+            if (result == 0) {
+                /* Output might be multi-line — print up to 2 history lines */
+                append_history(out);
+                append_history("[OK]");
+            } else if (result == -1) {
+                append_history("ERR: App not found");
+                append_history("Type APPS to list");
+            } else if (result == -2) {
+                append_history("ERR: Disk read fail");
+            } else if (result == -3) {
+                append_history("ERR: Out of memory");
+            }
+        }
+
+    } else if (str_eq(cmd, "reboot")) {
         append_history("Rebooting...");
-        // Output reboot to 8042 keyboard controller
+        /* Trigger reboot via PS/2 controller */
         outb(0x64, 0xFE);
-        while (1) {
-            __asm__ volatile("hlt");
-        }
-    } else if (strcmp(cmd, "") == 0) {
-        // Empty command, do nothing
+        while (1) { __asm__ volatile("hlt"); }
+
+    } else if (cmd[0] == '\0') {
+        /* Empty enter — print blank prompt line */
+
     } else {
         append_history("Unknown command");
+        append_history("Type HELP");
     }
 }
 
-void terminal_handle_key(uint8_t scancode) {
-    if (scancode & 0x80) return; // Release scancode
-    if (scancode >= 128) return;
+/* ============================================================
+ * terminal_handle_key — process incoming keyboard scancodes
+ *
+ * Extended scancodes (arrow keys) have an 0xE0 prefix:
+ *   0xE0 0x48  Up arrow
+ *   0xE0 0x50  Down arrow
+ * We detect these with a simple two-byte state machine.
+ * ============================================================ */
+static uint8_t extended_key_pending = 0; /* set when 0xE0 was last seen */
 
+void terminal_handle_key(uint8_t scancode) {
+    if (scancode & 0x80) {
+        extended_key_pending = 0;
+        return; /* key release, ignore */
+    }
+
+    /* Extended key prefix */
+    if (scancode == 0xE0) {
+        extended_key_pending = 1;
+        return;
+    }
+
+    if (extended_key_pending) {
+        extended_key_pending = 0;
+
+        if (scancode == 0x48) {
+            /* Up arrow — recall older command */
+            int next = cmd_hist_idx + 1;
+            if (next < cmd_hist_count) {
+                cmd_hist_idx = next;
+                str_copy(term_input, cmd_hist[cmd_hist_idx], TERM_INPUT_MAX + 1);
+                term_input_len = (uint32_t)str_len(term_input);
+            }
+            return;
+        }
+
+        if (scancode == 0x50) {
+            /* Down arrow — recall newer command */
+            int next = cmd_hist_idx - 1;
+            if (next >= 0) {
+                cmd_hist_idx = next;
+                str_copy(term_input, cmd_hist[cmd_hist_idx], TERM_INPUT_MAX + 1);
+                term_input_len = (uint32_t)str_len(term_input);
+            } else {
+                /* Past the newest entry — clear input */
+                cmd_hist_idx = -1;
+                term_input[0] = '\0';
+                term_input_len = 0;
+            }
+            return;
+        }
+
+        return; /* Unknown extended key */
+    }
+
+    if (scancode >= 128) return;
     char c = scancode_map[scancode];
     if (c == 0) return;
 
     if (c == '\b') {
+        /* Backspace */
         if (term_input_len > 0) {
             term_input_len--;
             term_input[term_input_len] = '\0';
         }
+        cmd_hist_idx = -1; /* Cancel history browsing on edit */
+
     } else if (c == '\n') {
+        /* Execute */
         term_input[term_input_len] = '\0';
+        push_cmd_hist(term_input);        /* Save to recall history */
         terminal_execute_command(term_input);
         term_input_len = 0;
-        term_input[0] = '\0';
+        term_input[0]  = '\0';
+
     } else {
-        // Enforce maximum size of 18 chars to fit within 200px window
-        if (term_input_len < 18) {
-            term_input[term_input_len] = c;
+        /* Normal character */
+        if (term_input_len < TERM_INPUT_MAX) {
+            term_input[term_input_len]     = c;
+            term_input[term_input_len + 1] = '\0';
             term_input_len++;
-            term_input[term_input_len] = '\0';
         }
+        cmd_hist_idx = -1; /* Cancel history browsing on new input */
     }
 }
 
+/* ============================================================
+ * draw_terminal_content — render the terminal window
+ *
+ * Layout (window is approx 200×130):
+ *
+ *  ┌──────────────────────────────┐  ← win->y
+ *  │ [TITLE BAR]                  │  ← 12px
+ *  │ ─────────────────────────── │
+ *  │  history[0]                  │  ← y+16
+ *  │  history[1]                  │  ← y+28
+ *  │  ...                         │
+ *  │  history[7]                  │  ← y+16+7*12 = y+100
+ *  │ ─────────────────────────── │
+ *  │  SQ> input_  (prompt)        │  ← y+112
+ *  └──────────────────────────────┘
+ * ============================================================ */
 void draw_terminal_content(Window *win) {
-    // 1. Draw black background area
-    draw_rect(win->x + 4, win->y + 14, win->w - 8, win->h - 18, 0);
+    /* 1. Black background */
+    draw_rect(win->x + 2, win->y + 13, win->w - 4, win->h - 15, 0);
 
-    // 2. Draw history lines (light green, color 10)
-    for (int i = 0; i < 5; i++) {
+    /* 2. Output history lines — green on black */
+    int min_x = win->x + 2;
+    int max_x = win->x + win->w - 2;
+    int min_y = win->y + 13;
+    int max_y = win->y + win->h - 2;
+
+    for (int i = 0; i < TERM_HISTORY_LINES; i++) {
         if (term_history[i][0] != '\0') {
-            draw_text(win->x + 8, win->y + 20 + (i * 12), term_history[i], 10);
+            draw_text_clipped(win->x + 6, win->y + 16 + (i * 12), term_history[i], 10,
+                              min_x, max_x, min_y, max_y);
         }
     }
 
-    // 3. Draw active input prompt line with blinking block cursor
-    char prompt_line[32];
-    str_copy(prompt_line, "SQ> ", 32);
-    int len = 4;
-    while (term_input[len - 4] != '\0' && len < 30) {
-        prompt_line[len] = term_input[len - 4];
-        len++;
-    }
-    prompt_line[len] = '_';
-    prompt_line[len + 1] = '\0';
+    /* 3. Separator line above prompt */
+    int sep_y = win->y + 16 + TERM_HISTORY_LINES * 12;
+    draw_rect(win->x + 2, sep_y, win->w - 4, 1, 8); /* dark gray line */
 
-    draw_text(win->x + 8, win->y + 80, prompt_line, 10);
+    /* 4. Active prompt line with blinking block cursor */
+    cursor_blink_tick++;
+
+    char prompt_line[TERM_INPUT_MAX + 8];
+    str_copy(prompt_line, "SQ> ", TERM_INPUT_MAX + 8);
+    int base = str_len("SQ> ");
+    for (int j = 0; j < (int)term_input_len && base + j < TERM_INPUT_MAX + 6; j++) {
+        prompt_line[base + j] = term_input[j];
+    }
+    int cursor_pos = base + (int)term_input_len;
+
+    /* Blink: show '_' for ~30 frames, hide for ~30 frames */
+    if ((cursor_blink_tick & 63) < 40) {
+        prompt_line[cursor_pos]     = '_';
+        prompt_line[cursor_pos + 1] = '\0';
+    } else {
+        prompt_line[cursor_pos] = '\0';
+    }
+
+    draw_text_clipped(win->x + 6, sep_y + 3, prompt_line, 10,
+                      min_x, max_x, min_y, max_y); /* bright green */
 }

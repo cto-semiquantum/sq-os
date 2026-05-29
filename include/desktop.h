@@ -2,7 +2,7 @@
 #define DESKTOP_H
 
 #include "window_manager.h"
-#include "mouse.h"
+#include "mouse.h"   /* resolved via -Idrivers */
 
 // Content Drawers
 void draw_welcome_content(Window *win);

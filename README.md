@@ -1,137 +1,101 @@
 # SQ-OS
 
-A custom operating system built **from scratch in x86 Assembly** — bootloader, protected mode kernel, and a full graphical desktop environment. No C. No libraries. Pure bare-metal.
+A custom operating system built using a hybrid **C and x86 Assembly** architecture — featuring a custom 32-bit Protected Mode kernel, a graphical windowing system, a program loader, a heap memory manager, and basic FAT12 filesystem support.
 
-> **Status**: Actively developed — GUI milestone reached 🔥
+> **Status**: Actively developed — Milestone 3 reached! program loader, heap memory manager, and filesystem foundation are fully operational. 🔥
 
 ---
 
 ## What This Is
 
-SQ-OS boots directly on real hardware (or QEMU), switches from 16-bit real mode into **32-bit Protected Mode**, sets up its own IDT, handles PS/2 keyboard + mouse via direct hardware polling, and renders a graphical desktop using VGA Mode 13h (320×200, 256 colors).
+SQ-OS boots directly on virtualized or real hardware, transitions from 16-bit real mode into **32-bit Protected Mode**, initializes GDT/IDT descriptor tables, handles PS/2 keyboard + mouse interrupts, and implements a graphical windowing desktop using VGA Mode 13h (320×200, 256 colors). 
 
-This is **not** a tutorial project or a BIOS wrapper. Everything — memory layout, interrupt handling, font rendering, mouse packet parsing, double-buffering — is hand-coded in assembly.
-
----
-
-## Current Features
-
-### Bootloader (boot.asm)
-- Stage 1: 512-byte MBR bootloader
-- Loads 30 sectors from disk into memory at `0x7E00`
-- Jumps to Stage 2 kernel
-
-### 32-bit Protected Mode Kernel (pmode.asm)
-- GDT setup with flat 4GB code + data segments
-- IDT with 256 gates — timer ISR, keyboard ISR, default handler
-- PIC remapping (IRQ0-7 → INT 32-39)
-- IRQ-driven keyboard input with scancode → ASCII translation
-- Interactive shell with commands: `help`, `about`, `version`, `clear`, `reboot`, `gui`
-- Text-mode VGA rendering (80×25, color attributes)
-- Stack at `0x90000` (safe conventional memory)
-
-### GUI Desktop (type `gui` in shell)
-- **VGA Mode 13h** — 320×200, 256 colors, direct framebuffer at `0xA0000`
-- **Double buffering** — renders to backbuffer at `0x50000`, blits to screen atomically (no flicker/trails)
-- **Stable render loop**: clear → desktop → taskbar → icons → windows → cursor (always last)
-- **PS/2 mouse** — direct hardware polling via port `0x64`/`0x60`, 3-byte packet parsing, sign-extension, bounds clamping
-- **Cursor** — 5×5 white square with black center dot, always rendered on top
-- **Clickable desktop icons** — FILES icon with hitbox detection
-- **Window system** — Win95-style 3D bevelled windows with title bar + close button
-- **SQ Files app** — opens on click, shows file list with icons, status bar
-- **ESC** — returns to shell
-
-### GUI Subsystem Architecture
-```
-pmode.asm          ← bootloader + PM entry + shell + ISRs
-gui/
-├── graphics.asm   ← draw_rect_pm, draw_window_pm, draw_char, draw_text, 8x8 font
-├── mouse.asm      ← PS/2 mouse state variables
-├── window.asm     ← draw_cursor_pm, draw_files_window, window data
-└── desktop.asm    ← redraw_desktop_pm (full frame pipeline)
-```
+With the latest milestone, the OS has transitioned from a pure Assembly codebase to a modular **C + ASM hybrid** layout, complete with an external program loader, dynamic memory allocation, and disk access capability.
 
 ---
 
-## Build
+## Key Features
 
-```bash
-# Compile the protected mode kernel (self-contained bootloader + kernel)
-nasm -f bin pmode.asm -o pmode.bin
-```
+### 32-bit Protected Mode Kernel
+- **GDT Setup**: Flat 4GB code and data descriptor segments.
+- **IDT and Interrupts**: Custom interrupt handler gates for keyboard, mouse, and RTC timer.
+- **ATA PIO Disk Driver**: Read sectors directly from hard disk using port I/O.
+- **PIC Remapping**: IRQ0–7 mapped to INT 32–39, IRQ8–15 mapped to INT 40–47.
+
+### Memory Management
+- **Kernel Heap**: Located at the 1MB physical boundary (`0x100000`) with a 256KB arena.
+- **Bump Allocator**: Implements `kmalloc(size)` and `kfree(ptr)` to handle dynamic buffer allocation for windows, apps, and program loading.
+- **Memory Diagnostics**: Use the `mem` terminal command to view heap statistics (used, free, and block counts).
+
+### Program Loader & App Store
+- **Raw Sector App Store**: Sectors starting at `50` store application files on the raw disk image.
+- **Position-Independent Binaries**: App binaries (such as `hello.asm`) use a call/pop PIC base recovery technique so they execute cleanly from any heap allocation address.
+- **Dynamic Program Execution**: Run external applications using the `run <app.app>` command. It allocates heap memory, reads program sectors, executes via function pointers, and frees memory upon exit.
+
+### FAT12 Filesystem Foundation
+- **BPB Structure Support**: Real FAT12 volume definitions.
+- **Directory Reader**: Reads sector-based listings and lists files. Use the `files` command to query the disk.
+
+### Graphical Desktop Environment
+- **VGA Mode 13h**: 320×200, 256 colors with double-buffering at `0x50000` to eliminate rendering flicker.
+- **Retro Gradient Wallpaper**: A custom procedurally generated wallpaper renders as the desktop background.
+- **Window Manager**: Handles window hierarchy (Z-order), mouse click focus changes, title bars, and draggable windows.
+- **Advanced Terminal Application**:
+  - 8-line output history ring buffer.
+  - Command recall history using **Up/Down arrows**.
+  - Boundary-clipped text rendering (`draw_text_clipped`) to prevent text from bleeding outside the window frames.
+  - Interactive commands: `help`, `about`, `version`, `mem`, `files`, `apps`, `run <app>`, `reboot`.
 
 ---
 
-## Run
-
-```bash
-qemu-system-x86_64 -drive format=raw,file=pmode.bin -m 4M
-```
-
-Then at the shell prompt:
-```
-SQ> gui
-```
-
----
-
-## Project Structure
+## Project Directory Structure
 
 ```
 SQ-OS/
-├── pmode.asm          ← Main: real-mode loader + 32-bit PM kernel + shell
-├── boot.asm           ← Simple 16-bit bootloader (legacy)
-├── kernel.asm         ← 16-bit real-mode kernel (legacy)
-├── shell.asm          ← 16-bit shell (legacy)
-├── graphics.asm       ← 16-bit graphics (legacy)
-├── gui/
-│   ├── graphics.asm   ← PM GUI: primitives + font
-│   ├── mouse.asm      ← PM GUI: mouse state
-│   ├── window.asm     ← PM GUI: windows + cursor
-│   └── desktop.asm    ← PM GUI: frame pipeline
-├── Makefile
-└── build.bat
+├── apps/               ← External applications (e.g., hello.asm)
+├── assets/             ← Wallpaper generation script and static data
+├── boot/               ← 16-bit Stage 1 bootloader (boot.asm)
+├── drivers/            ← Hardware drivers (mouse.c, mouse.h)
+├── fs/                 ← Filesystem foundation (fat12.c, fat12.h)
+├── gui/                ← Reference legacy Assembly GUI files
+├── include/            ← Kernel C API headers
+├── kernel/             ← Kernel entry point (entry.asm) and C subsystems
+├── legacy/             ← Reorganized pure Assembly codebase files
+├── build.bat           ← Integrated build pipeline script
+├── linker.ld           ← Linker script for compiling 32-bit ELF binaries
+└── README.md           ← Project documentation
 ```
 
 ---
 
-## Tech Stack
+## Build and Run
 
-| Layer | Tech |
-|-------|------|
-| Language | x86 Assembly (NASM) |
-| Mode | 32-bit Protected Mode (flat) |
-| Graphics | VGA Mode 13h (320×200×256) |
-| Input | PS/2 keyboard + mouse (direct hardware) |
-| Emulator | QEMU |
-| No dependencies | No C, no libc, no BIOS in GUI mode |
+### Prerequisites
+- [NASM](https://www.nasm.us/)
+- i686-elf-gcc Toolchain (with `i686-elf-gcc` and `i686-elf-ld` in system path)
+- Python 3
+- QEMU Emulator (`qemu-system-i386`)
 
----
+### Build Pipeline
+Run the build script to compile the assembly, build all C source files, link the hybrid kernel, pad the raw image, and embed the application store:
 
-## Milestones Reached
+```cmd
+.\build.bat
+```
 
-- [x] Custom bootloader
-- [x] Protected mode switch (GDT, IDT, PIC)
-- [x] IRQ-driven keyboard shell
-- [x] VGA Mode 13h activation (pure register programming)
-- [x] PS/2 mouse packet parsing
-- [x] Double-buffered GUI render loop
-- [x] Clickable desktop icons
-- [x] Window system with open/close
-- [x] Modular GUI subsystem (`gui/` directory)
+### Emulate
+Launch the raw image in QEMU:
 
-## Roadmap
+```cmd
+qemu-system-i386 -drive format=raw,file=os.img -m 32M
+```
 
-- [ ] Arrow cursor sprite
-- [ ] Terminal window inside GUI
-- [ ] Window manager (z-order, focus, multiple windows)
-- [ ] Real FAT12 filesystem (read actual files)
-- [ ] More desktop apps
+*Inside the emulator, you can exit the GUI and return to the text shell at any time by pressing **ESC**.*
 
 ---
 
-## Author
+## Authors & Acknowledgement
 
-**Harsh Jha** — SemiQuantum  
+- **Harsh Jha** — SemiQuantum
 
-Built from scratch. No shortcuts.
+Built from the hardware up. No shortcuts.

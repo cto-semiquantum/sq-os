@@ -12,9 +12,9 @@ mov es, ax
 mov ss, ax
 mov sp, 0x7c00
 
-; Load Stage 2 Kernel (sectors 2 to 51) into 0x7e00 (approx 25 KB)
+; Load Stage 2 Kernel (sectors 2 to 101) into 0x7e00 (approx 50 KB headroom)
 mov ah, 0x02
-mov al, 50          ; Load 50 sectors
+mov al, 100         ; Load 100 sectors (50 KB — plenty for the hybrid kernel)
 mov ch, 0
 mov cl, 2           ; Start at sector 2
 mov dh, 0
