@@ -27,5 +27,6 @@ void init_terminal_app(void);
 void terminal_handle_key(uint8_t scancode);
 void draw_terminal_content(Window *win);
 void terminal_execute_command(const char *cmd);
+void append_history(const char *line);
 
 #endif /* TERMINAL_APP_H */

@@ -5,6 +5,9 @@ Window window_files;
 Window window_terminal;
 Window window_settings;
 Window window_welcome;
+Window window_taskmanager;
+Window window_notes;
+Window window_calc;
 
 Window *window_order[NUM_WINDOWS];
 
@@ -17,6 +20,9 @@ extern void draw_welcome_content(Window *win);
 extern void draw_files_content(Window *win);
 extern void draw_terminal_content(Window *win);
 extern void draw_settings_content(Window *win);
+extern void draw_taskmanager_content(Window *win);
+extern void draw_notes_content(Window *win);
+extern void draw_calc_content(Window *win);
 
 void init_windows(void) {
     // Welcome Window (focused and visible on boot)
@@ -51,19 +57,52 @@ void init_windows(void) {
 
     // Settings Window
     window_settings.x = 80;
-    window_settings.y = 70;
+    window_settings.y = 35;
     window_settings.w = 160;
-    window_settings.h = 90;
+    window_settings.h = 125;
     window_settings.title = "SETTINGS";
     window_settings.visible = 0;
     window_settings.active = 0;
     window_settings.color = 7;
 
+    // Task Manager / System Monitor Window
+    window_taskmanager.x = 30;
+    window_taskmanager.y = 35;
+    window_taskmanager.w = 260;
+    window_taskmanager.h = 130;
+    window_taskmanager.title = "SQ TASK MANAGER";
+    window_taskmanager.visible = 0;
+    window_taskmanager.active = 0;
+    window_taskmanager.color = 7;
+
+    // Notes Window
+    window_notes.x = 70;
+    window_notes.y = 40;
+    window_notes.w = 200;
+    window_notes.h = 125;
+    window_notes.title = "NOTES";
+    window_notes.visible = 0;
+    window_notes.active = 0;
+    window_notes.color = 7;
+
+    // Calculator Window
+    window_calc.x = 90;
+    window_calc.y = 50;
+    window_calc.w = 140;
+    window_calc.h = 120;
+    window_calc.title = "CALCULATOR";
+    window_calc.visible = 0;
+    window_calc.active = 0;
+    window_calc.color = 7;
+
     // Set initial Z-order (Welcome on top)
     window_order[0] = &window_files;
     window_order[1] = &window_terminal;
     window_order[2] = &window_settings;
-    window_order[3] = &window_welcome;
+    window_order[3] = &window_taskmanager;
+    window_order[4] = &window_notes;
+    window_order[5] = &window_calc;
+    window_order[6] = &window_welcome;
 }
 
 void draw_window_border(int x, int y, int w, int h, uint8_t color) {
@@ -134,6 +173,12 @@ void draw_window(Window *win) {
         draw_terminal_content(win);
     } else if (win == &window_settings) {
         draw_settings_content(win);
+    } else if (win == &window_taskmanager) {
+        draw_taskmanager_content(win);
+    } else if (win == &window_notes) {
+        draw_notes_content(win);
+    } else if (win == &window_calc) {
+        draw_calc_content(win);
     }
 }
 
@@ -149,6 +194,9 @@ void focus_window(Window *win) {
     window_terminal.active = 0;
     window_settings.active = 0;
     window_welcome.active = 0;
+    window_taskmanager.active = 0;
+    window_notes.active = 0;
+    window_calc.active = 0;
 
     // Activate selected window
     win->active = 1;

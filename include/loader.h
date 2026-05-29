@@ -53,7 +53,7 @@
  * ================================================================ */
 
 /* Fixed sector for the app directory */
-#define APP_DIR_SECTOR     50U
+#define APP_DIR_SECTOR     80U
 #define APP_DIR_MAX_ENTRIES 8
 
 /* Maximum size of an app binary (safety cap) */

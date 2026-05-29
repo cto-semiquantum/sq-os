@@ -2,9 +2,32 @@ cpu 686
 [org 0x7c00]
 [bits 16]
 
-; =============================================
-; STAGE 1: Real Mode Bootloader
-; =============================================
+jmp short start
+nop
+
+oem_name            db 'SQ-OS   '
+bytes_per_sector    dw 512
+sectors_per_cluster db 1
+reserved_sectors    dw 82
+num_fats            db 2
+root_entry_count    dw 64
+total_sectors_16    dw 2880
+media_type          db 0xF0
+fat_size_16         dw 3
+sectors_per_track   dw 18
+num_heads           dw 2
+hidden_sectors      dd 0
+total_sectors_32    dd 0
+
+; Extended Boot Record
+drive_number        db 0
+reserved1           db 0
+boot_sig            db 0x29
+volume_id           dd 0x12345678
+volume_label        db 'SQ-OS      '
+fs_type             db 'FAT12   '
+
+start:
 cli
 xor ax, ax
 mov ds, ax

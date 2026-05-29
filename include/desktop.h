@@ -8,6 +8,11 @@
 void draw_welcome_content(Window *win);
 void draw_files_content(Window *win);
 void draw_settings_content(Window *win);
+void draw_taskmanager_content(Window *win);
+void draw_notes_content(Window *win);
+void notes_handle_key(uint8_t scancode);
+void draw_calc_content(Window *win);
+void calc_press(char c);
 
 // Main Desktop Drawing and Interaction
 void redraw_desktop(void);

@@ -2,6 +2,9 @@
 #include "desktop.h"
 #include "graphics.h"
 #include "memory.h"
+#include "paging.h"
+#include "process.h"
+#include "syscall.h"
 
 #define VIDEO_MEM ((volatile uint16_t *)0xB8000)
 #define MAX_ROWS 25
@@ -391,6 +394,15 @@ void draw_splash_frame(int percent) {
 void kernel_main(void) {
     // 0. Initialise kernel heap (must be first)
     heap_init();
+
+    // Initialise virtual memory paging (maps kernel 4MB and user 4MB)
+    paging_init();
+
+    // Initialise process control block system
+    process_init();
+
+    // Initialise system call routing
+    syscall_init();
 
     // 1. Immediately transition to VGA graphics mode 13h
     init_vga_mode13();

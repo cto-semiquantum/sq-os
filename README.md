@@ -28,7 +28,7 @@ With the latest milestone, the OS has transitioned from a pure Assembly codebase
 - **Memory Diagnostics**: Use the `mem` terminal command to view heap statistics (used, free, and block counts).
 
 ### Program Loader & App Store
-- **Raw Sector App Store**: Sectors starting at `50` store application files on the raw disk image.
+- **Raw Sector App Store**: Sectors starting at `80` store application files on the raw disk image.
 - **Position-Independent Binaries**: App binaries (such as `hello.asm`) use a call/pop PIC base recovery technique so they execute cleanly from any heap allocation address.
 - **Dynamic Program Execution**: Run external applications using the `run <app.app>` command. It allocates heap memory, reads program sectors, executes via function pointers, and frees memory upon exit.
 

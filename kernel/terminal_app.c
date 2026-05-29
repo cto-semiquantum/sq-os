@@ -2,6 +2,9 @@
 #include "../fs/fat12.h"
 #include "memory.h"
 #include "loader.h"
+#include "paging.h"
+#include "syscall.h"
+#include "process.h"
 
 /* ============================================================
  * Terminal State
@@ -140,8 +143,126 @@ void terminal_execute_command(const char *cmd) {
     if (str_eq(cmd, "help")) {
         append_history("HELP ABOUT VERSION");
         append_history("CLEAR MEM HEAP FILES");
-        append_history("APPS  RUN <name>");
-        append_history("REBOOT");
+        append_history("APPS  RUN <name> REBOOT");
+        append_history("PAGING SYSCALLS PROC");
+
+    } else if (str_eq(cmd, "paging")) {
+        if (is_paging_enabled()) {
+            append_history("Paging: Enabled");
+            char dir_str[40];
+            str_copy(dir_str, "CR3: 0x", 40);
+            int p = str_len(dir_str);
+            uint32_t cr3 = get_page_directory_addr();
+            char hex[9];
+            for (int j = 7; j >= 0; j--) {
+                uint32_t val = (cr3 >> (j * 4)) & 0xF;
+                if (val < 10) hex[7 - j] = '0' + val;
+                else hex[7 - j] = 'A' + (val - 10);
+            }
+            hex[8] = '\0';
+            for (int j = 0; hex[j] && p < 39; j++) dir_str[p++] = hex[j];
+            dir_str[p] = '\0';
+            append_history(dir_str);
+            append_history("Kernel Map: 0-4MB (Priv)");
+            append_history("User Map: 4-8MB (User)");
+        } else {
+            append_history("Paging: Disabled");
+        }
+
+    } else if (str_eq(cmd, "syscalls")) {
+        append_history("Syscall Stats (int 0x80):");
+        char line[40];
+        char num[12];
+        
+        str_copy(line, "  sys_print:  ", 40);
+        u32_to_dec(get_syscall_count(1), num);
+        int p = str_len(line);
+        for (int j = 0; num[j] && p < 39; j++) line[p++] = num[j];
+        line[p] = '\0';
+        append_history(line);
+
+        str_copy(line, "  sys_malloc: ", 40);
+        u32_to_dec(get_syscall_count(2), num);
+        p = str_len(line);
+        for (int j = 0; num[j] && p < 39; j++) line[p++] = num[j];
+        line[p] = '\0';
+        append_history(line);
+
+        str_copy(line, "  sys_free:   ", 40);
+        u32_to_dec(get_syscall_count(3), num);
+        p = str_len(line);
+        for (int j = 0; num[j] && p < 39; j++) line[p++] = num[j];
+        line[p] = '\0';
+        append_history(line);
+
+        str_copy(line, "  sys_time:   ", 40);
+        u32_to_dec(get_syscall_count(4), num);
+        p = str_len(line);
+        for (int j = 0; num[j] && p < 39; j++) line[p++] = num[j];
+        line[p] = '\0';
+        append_history(line);
+
+        str_copy(line, "  sys_exit:   ", 40);
+        u32_to_dec(get_syscall_count(5), num);
+        p = str_len(line);
+        for (int j = 0; num[j] && p < 39; j++) line[p++] = num[j];
+        line[p] = '\0';
+        append_history(line);
+
+    } else if (str_eq(cmd, "proc")) {
+        append_history("Processes:");
+        int found = 0;
+        for (int j = 0; j < MAX_PROCESSES; j++) {
+            if (process_table[j].state != PROC_STATE_UNUSED) {
+                found = 1;
+                char line[40];
+                char id_str[6];
+                u32_to_dec(process_table[j].id, id_str);
+                
+                str_copy(line, id_str, 40);
+                int p = str_len(line);
+                while (p < 3) line[p++] = ' ';
+                line[p] = '\0';
+                
+                int n_idx = 0;
+                while (process_table[j].name[n_idx] && p < 15) {
+                    line[p++] = process_table[j].name[n_idx++];
+                }
+                while (p < 16) line[p++] = ' ';
+                line[p] = '\0';
+                
+                const char *st_str = "UNK";
+                if (process_table[j].state == PROC_STATE_CREATED) st_str = "CREAT";
+                else if (process_table[j].state == PROC_STATE_RUNNING) st_str = "RUN";
+                else if (process_table[j].state == PROC_STATE_TERMINATED) st_str = "TERM";
+                
+                int s_idx = 0;
+                while (st_str[s_idx] && p < 25) {
+                    line[p++] = st_str[s_idx++];
+                }
+                while (p < 24) line[p++] = ' ';
+                line[p] = '\0';
+                
+                char hex[9];
+                uint32_t ent = process_table[j].entry_point;
+                for (int k = 7; k >= 0; k--) {
+                    uint32_t val = (ent >> (k * 4)) & 0xF;
+                    if (val < 10) hex[7 - k] = '0' + val;
+                    else hex[7 - k] = 'A' + (val - 10);
+                }
+                hex[8] = '\0';
+                
+                int h_idx = 0;
+                while (hex[h_idx] && p < 39) {
+                    line[p++] = hex[h_idx++];
+                }
+                line[p] = '\0';
+                append_history(line);
+            }
+        }
+        if (!found) {
+            append_history("No processes in table");
+        }
 
     } else if (str_eq(cmd, "about")) {
         append_history("SQ-OS by Harsh");

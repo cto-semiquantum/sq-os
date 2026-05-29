@@ -96,6 +96,30 @@ int fat12_init(void);
  * Returns the number of valid (non-deleted, non-empty) entries found. */
 int fat12_list_root(DirEntry *out_entries, int max_entries);
 
+/* fat12_find_file — search the root directory for a file by name.
+ * Returns 0 on success, -1 if not found. */
+int fat12_find_file(const char *name, DirEntry *out_entry);
+
+/* fat12_read_file — read file content contiguous blocks.
+ * Returns number of bytes read, or -1 on error. */
+int fat12_read_file(DirEntry *entry, uint8_t *buffer, uint32_t max_bytes);
+
+/* disk_write_sector — write one 512-byte sector via ATA PIO-28.
+ * Returns 0 on success, -1 on error. */
+int disk_write_sector(uint32_t lba, const uint8_t *buffer);
+
+/* fs_create_file — search or create a file in the root directory.
+ * Returns 0 on success, -1 on error. */
+int fs_create_file(const char *name, uint16_t first_cluster);
+
+/* fs_write_file — write/overwrite a file's contents and update directory entry size.
+ * Returns number of bytes written, or -1 on error. */
+int fs_write_file(const char *name, const uint8_t *buffer, uint32_t size);
+
+/* fs_read_file — open and read a file's contents into a buffer.
+ * Returns number of bytes read, or -1 on error. */
+int fs_read_file(const char *name, uint8_t *buffer, uint32_t max_bytes);
+
 /* Cached BPB from boot sector (available after fat12_init() succeeds). */
 extern BPB g_bpb;
 

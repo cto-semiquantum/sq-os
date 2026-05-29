@@ -1,6 +1,8 @@
 #include "loader.h"
 #include "../fs/fat12.h"   /* disk_read_sector()  */
 #include "memory.h"        /* kmalloc() / kfree() */
+#include "process.h"       /* process context */
+#include "terminal_app.h"
 
 /* ================================================================
  * App directory entry structure (matches disk layout, 64 bytes)
@@ -111,20 +113,82 @@ int load_program(const char *name, char *out_buf, uint32_t buf_size) {
         cur_sector++;
     }
 
-    /* 6. Execute: cast heap buffer to function pointer and call
-     *    Safe in flat 32-bit PM — no paging, no NX bit, ring 0.
-     *    The app is PIC so any load address works.                */
+    /* 6. Execute: Copy to User Space (0x00400000), register process, and execute */
     out_buf[0] = '\0';
-    AppEntry entry = (AppEntry)code;
-    entry(out_buf, buf_size);
+    
+    append_history("DBG: Copying app...");
+    uint8_t *user_space_code = (uint8_t *)0x00400000;
+    for (uint32_t b = 0; b < bin_size; b++) {
+        user_space_code[b] = code[b];
+    }
+    
+    // Free the temporary heap allocation since we copied it to user space
+    kfree(code);
+    append_history("DBG: App copied to 0x400000");
+
+    // Print stack pointer ESP
+    uint32_t current_esp;
+    __asm__ volatile("mov %%esp, %0" : "=r"(current_esp));
+    char esp_str[40];
+    // Simple copy loop
+    const char *esp_lbl = "DBG: ESP = 0x";
+    int p_esp = 0;
+    while (esp_lbl[p_esp]) { esp_str[p_esp] = esp_lbl[p_esp]; p_esp++; }
+    char hex_esp[9];
+    for (int j = 7; j >= 0; j--) {
+        uint32_t val = (current_esp >> (j * 4)) & 0xF;
+        if (val < 10) hex_esp[7 - j] = '0' + val;
+        else hex_esp[7 - j] = 'A' + (val - 10);
+    }
+    hex_esp[8] = '\0';
+    for (int j = 0; hex_esp[j] && p_esp < 39; j++) esp_str[p_esp++] = hex_esp[j];
+    esp_str[p_esp] = '\0';
+    append_history(esp_str);
+
+    // Create process entry
+    Process *p = process_create(name, (uint32_t)user_space_code, bin_size);
+    if (p) {
+        current_process = p;
+        p->state = PROC_STATE_RUNNING;
+        append_history("DBG: Process registered");
+    }
+
+    // Set exit longjmp handler. If sys_exit is called, it returns here.
+    append_history("DBG: Saving context...");
+    
+    // Safety check: if process creation failed
+    if (p == (void *)0) {
+        append_history("DBG: Process create failed!");
+        return -3;
+    }
+
+    int sj_ret = setjmp(p->exit_env);
+    char sj_str[40];
+    const char *sj_lbl = "DBG: setjmp ret = ";
+    int p_sj = 0;
+    while (sj_lbl[p_sj]) { sj_str[p_sj] = sj_lbl[p_sj]; p_sj++; }
+    sj_str[p_sj++] = '0' + sj_ret;
+    sj_str[p_sj] = '\0';
+    append_history(sj_str);
+
+    if (sj_ret == 0) {
+        AppEntry entry = (AppEntry)user_space_code;
+        append_history("DBG: Jumping to entry...");
+        entry(out_buf, buf_size);
+        append_history("DBG: Returned from entry");
+    } else {
+        append_history("DBG: Recovered from sys_exit");
+    }
+
+    if (p) {
+        p->state = PROC_STATE_TERMINATED;
+        current_process = (void *)0;
+    }
 
     /* Null-terminate in case app forgot */
     out_buf[buf_size - 1] = '\0';
 
-    /* 7. Release heap memory */
-    kfree(code);
-
-    return 0; /* Success */
+    return 0;
 }
 
 /* ================================================================
