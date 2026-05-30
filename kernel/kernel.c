@@ -14,6 +14,12 @@ volatile uint32_t cur_row = 2;
 volatile uint32_t cur_col = 0;
 volatile uint32_t buf_len = 0;
 
+volatile uint32_t system_ticks = 0;
+
+void timer_handler(void) {
+    system_ticks++;
+}
+
 static char input_buffer[80];
 
 static const char *title_str   = "  SQ-OS  |  32-BIT PROTECTED MODE SHELL  ";

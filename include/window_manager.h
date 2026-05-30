@@ -14,7 +14,7 @@ typedef struct Window {
     uint8_t color;
 } Window;
 
-#define NUM_WINDOWS 7
+#define NUM_WINDOWS 8
 extern Window window_files;
 extern Window window_terminal;
 extern Window window_settings;
@@ -22,6 +22,7 @@ extern Window window_welcome;
 extern Window window_taskmanager;
 extern Window window_notes;
 extern Window window_calc;
+extern Window window_snake;
 
 extern Window *window_order[NUM_WINDOWS];
 

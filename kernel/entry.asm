@@ -13,6 +13,7 @@ global longjmp
 extern kernel_main
 extern keyboard_handler
 extern syscall_handler
+extern timer_handler
 
 _start:
     ; Set segment registers to data selector (0x10)
@@ -109,10 +110,11 @@ default_isr:
     iret
 
 timer_isr:
-    push eax
+    pushad
+    call timer_handler
     mov al, 0x20
     out 0x20, al
-    pop eax
+    popad
     iret
 
 keyboard_isr:

@@ -8,6 +8,7 @@ Window window_welcome;
 Window window_taskmanager;
 Window window_notes;
 Window window_calc;
+Window window_snake;
 
 Window *window_order[NUM_WINDOWS];
 
@@ -23,6 +24,7 @@ extern void draw_settings_content(Window *win);
 extern void draw_taskmanager_content(Window *win);
 extern void draw_notes_content(Window *win);
 extern void draw_calc_content(Window *win);
+extern void draw_snake_content(Window *win);
 
 void init_windows(void) {
     // Welcome Window (focused and visible on boot)
@@ -95,6 +97,16 @@ void init_windows(void) {
     window_calc.active = 0;
     window_calc.color = 7;
 
+    // Snake Window
+    window_snake.x = 100;
+    window_snake.y = 40;
+    window_snake.w = 180;
+    window_snake.h = 120;
+    window_snake.title = "SNAKE";
+    window_snake.visible = 0;
+    window_snake.active = 0;
+    window_snake.color = 7;
+
     // Set initial Z-order (Welcome on top)
     window_order[0] = &window_files;
     window_order[1] = &window_terminal;
@@ -102,7 +114,8 @@ void init_windows(void) {
     window_order[3] = &window_taskmanager;
     window_order[4] = &window_notes;
     window_order[5] = &window_calc;
-    window_order[6] = &window_welcome;
+    window_order[6] = &window_snake;
+    window_order[7] = &window_welcome;
 }
 
 void draw_window_border(int x, int y, int w, int h, uint8_t color) {
@@ -179,6 +192,8 @@ void draw_window(Window *win) {
         draw_notes_content(win);
     } else if (win == &window_calc) {
         draw_calc_content(win);
+    } else if (win == &window_snake) {
+        draw_snake_content(win);
     }
 }
 
@@ -197,6 +212,7 @@ void focus_window(Window *win) {
     window_taskmanager.active = 0;
     window_notes.active = 0;
     window_calc.active = 0;
+    window_snake.active = 0;
 
     // Activate selected window
     win->active = 1;

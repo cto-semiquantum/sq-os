@@ -87,6 +87,10 @@ echo    - apps/notes.c
 i686-elf-gcc %CFLAGS% apps\notes.c -o notes.o
 if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 
+echo    - apps/snake.c
+i686-elf-gcc %CFLAGS% apps\snake.c -o snake.o
+if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
+
 echo    - kernel/rtc.c
 i686-elf-gcc %CFLAGS% kernel\rtc.c -o rtc.o
 if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
@@ -118,7 +122,7 @@ echo 4. Linking Kernel (linker.ld)
 i686-elf-ld -m elf_i386 -T linker.ld -o kernel.bin ^
     entry.o kernel.o graphics.o memory.o wallpaper.o ^
     window_manager.o mouse.o terminal_app.o desktop.o ^
-    notes.o ^
+    notes.o snake.o ^
     rtc.o fat12.o loader.o paging.o process.o syscall.o
 if %ERRORLEVEL% neq 0 (
     echo Linker Error.
