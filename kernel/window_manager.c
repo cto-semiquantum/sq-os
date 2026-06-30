@@ -9,6 +9,7 @@ Window window_taskmanager;
 Window window_notes;
 Window window_calc;
 Window window_snake;
+Window window_browser;
 
 Window *window_order[NUM_WINDOWS];
 
@@ -25,6 +26,7 @@ extern void draw_taskmanager_content(Window *win);
 extern void draw_notes_content(Window *win);
 extern void draw_calc_content(Window *win);
 extern void draw_snake_content(Window *win);
+extern void draw_browser_content(Window *win);
 
 void init_windows(void) {
     // Welcome Window (focused and visible on boot)
@@ -107,6 +109,16 @@ void init_windows(void) {
     window_snake.active = 0;
     window_snake.color = 7;
 
+    // SQ Browser Window
+    window_browser.x = 30;
+    window_browser.y = 40;
+    window_browser.w = 260;
+    window_browser.h = 145;
+    window_browser.title = "SQ Browser";
+    window_browser.visible = 0;
+    window_browser.active = 0;
+    window_browser.color = 7;
+
     // Set initial Z-order (Welcome on top)
     window_order[0] = &window_files;
     window_order[1] = &window_terminal;
@@ -115,7 +127,8 @@ void init_windows(void) {
     window_order[4] = &window_notes;
     window_order[5] = &window_calc;
     window_order[6] = &window_snake;
-    window_order[7] = &window_welcome;
+    window_order[7] = &window_browser;
+    window_order[8] = &window_welcome;
 }
 
 void draw_window_border(int x, int y, int w, int h, uint8_t color) {
@@ -194,6 +207,8 @@ void draw_window(Window *win) {
         draw_calc_content(win);
     } else if (win == &window_snake) {
         draw_snake_content(win);
+    } else if (win == &window_browser) {
+        draw_browser_content(win);
     }
 }
 
@@ -213,6 +228,7 @@ void focus_window(Window *win) {
     window_notes.active = 0;
     window_calc.active = 0;
     window_snake.active = 0;
+    window_browser.active = 0;
 
     // Activate selected window
     win->active = 1;

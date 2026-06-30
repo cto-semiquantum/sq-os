@@ -53,11 +53,11 @@
  * ================================================================ */
 
 /* Fixed sector for the app directory */
-#define APP_DIR_SECTOR     80U
+#define APP_DIR_SECTOR     200U
 #define APP_DIR_MAX_ENTRIES 8
 
 /* Maximum size of an app binary (safety cap) */
-#define APP_MAX_BINARY_SIZE 4096U
+#define APP_MAX_BINARY_SIZE 32768U
 
 /* Output buffer size (must match what terminal passes) */
 #define APP_OUT_BUF_SIZE   64U

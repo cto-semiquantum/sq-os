@@ -19,18 +19,16 @@ void draw_cursor(void) {
     int cx = mouse_x;
     int cy = mouse_y;
 
-    // Clamp so 5x5 cursor stays fully on screen
-    if (cx > 315) cx = 315;
-    if (cy > 195) cy = 195;
+    // Clamp so 7x7 cursor stays fully on screen
+    if (cx > 313) cx = 313;
+    if (cy > 193) cy = 193;
 
-    // 5x5 white square (color 15)
-    draw_rect(cx, cy, 5, 5, 15);
+    // Draw 7x7 black outline
+    draw_rect(cx, cy, 7, 7, 0);
 
-    // 1x1 black center dot at mouse_x + 2, mouse_y + 2 (color 0)
-    // Make sure we clamp the inner dot too
-    int dx = mouse_x + 2;
-    int dy = mouse_y + 2;
-    if (dx > 317) dx = 317;
-    if (dy > 197) dy = 197;
-    draw_rect(dx, dy, 1, 1, 0);
+    // Draw 5x5 white inner body
+    draw_rect(cx + 1, cy + 1, 5, 5, 15);
+
+    // Draw 1x1 black center dot
+    draw_rect(cx + 3, cy + 3, 1, 1, 0);
 }

@@ -2,7 +2,9 @@
 #include "../fs/fat12.h"   /* disk_read_sector()  */
 #include "memory.h"        /* kmalloc() / kfree() */
 #include "process.h"       /* process context */
+#include "window_manager.h"
 #include "terminal_app.h"
+#include "elf.h"
 
 /* ================================================================
  * App directory entry structure (matches disk layout, 64 bytes)
@@ -66,128 +68,161 @@ static int load_app_dir(AppDirEntry *entries, int max_entries) {
  * load_program — load and execute a named application
  * ================================================================ */
 int load_program(const char *name, char *out_buf, uint32_t buf_size) {
-    /* 1. Read app directory */
-    AppDirEntry dir[APP_DIR_MAX_ENTRIES];
-    int dir_count = load_app_dir(dir, APP_DIR_MAX_ENTRIES);
-    if (dir_count < 0) return -2; /* Disk error */
+    DirEntry fe;
+    uint8_t *code = (void *)0;
+    uint32_t bin_size = 0;
 
-    /* 2. Find the requested app */
-    int found_idx = -1;
-    for (int i = 0; i < dir_count; i++) {
-        if (ldr_str_eq_ci(dir[i].name, name)) {
-            found_idx = i;
-            break;
-        }
-    }
-    if (found_idx < 0) return -1; /* Not found */
+    if (fat12_init() == 0 && fat12_find_file(name, &fe) == 0) {
+        bin_size = fe.file_size;
+        if (bin_size == 0 || bin_size > APP_MAX_BINARY_SIZE) return -2;
 
-    AppDirEntry *app = &dir[found_idx];
-    uint32_t bin_size   = app->size;
-    uint32_t bin_sector = app->sector;
+        code = (uint8_t *)kmalloc((size_t)bin_size);
+        if (!code) return -3;
 
-    /* 3. Sanity check */
-    if (bin_size == 0 || bin_size > APP_MAX_BINARY_SIZE) return -2;
-
-    /* 4. Allocate heap memory for binary */
-    uint8_t *code = (uint8_t *)kmalloc((size_t)bin_size);
-    if (!code) return -3;
-
-    /* 5. Read binary sectors into heap buffer
-     *    Each binary sector is plain data (no size prefix in binary sectors,
-     *    the size came from the app directory).                              */
-    uint32_t bytes_loaded = 0;
-    uint32_t cur_sector   = bin_sector;
-    uint8_t  sector_buf[512];
-
-    while (bytes_loaded < bin_size) {
-        if (disk_read_sector(cur_sector, sector_buf) != 0) {
+        int bytes_read = fs_read_file(name, code, bin_size);
+        if (bytes_read < 0) {
             kfree(code);
             return -2;
         }
-        uint32_t remaining = bin_size - bytes_loaded;
-        uint32_t chunk     = (remaining < 512) ? remaining : 512;
-        for (uint32_t b = 0; b < chunk; b++) {
-            code[bytes_loaded + b] = sector_buf[b];
-        }
-        bytes_loaded += chunk;
-        cur_sector++;
-    }
-
-    /* 6. Execute: Copy to User Space (0x00400000), register process, and execute */
-    out_buf[0] = '\0';
-    
-    append_history("DBG: Copying app...");
-    uint8_t *user_space_code = (uint8_t *)0x00400000;
-    for (uint32_t b = 0; b < bin_size; b++) {
-        user_space_code[b] = code[b];
-    }
-    
-    // Free the temporary heap allocation since we copied it to user space
-    kfree(code);
-    append_history("DBG: App copied to 0x400000");
-
-    // Print stack pointer ESP
-    uint32_t current_esp;
-    __asm__ volatile("mov %%esp, %0" : "=r"(current_esp));
-    char esp_str[40];
-    // Simple copy loop
-    const char *esp_lbl = "DBG: ESP = 0x";
-    int p_esp = 0;
-    while (esp_lbl[p_esp]) { esp_str[p_esp] = esp_lbl[p_esp]; p_esp++; }
-    char hex_esp[9];
-    for (int j = 7; j >= 0; j--) {
-        uint32_t val = (current_esp >> (j * 4)) & 0xF;
-        if (val < 10) hex_esp[7 - j] = '0' + val;
-        else hex_esp[7 - j] = 'A' + (val - 10);
-    }
-    hex_esp[8] = '\0';
-    for (int j = 0; hex_esp[j] && p_esp < 39; j++) esp_str[p_esp++] = hex_esp[j];
-    esp_str[p_esp] = '\0';
-    append_history(esp_str);
-
-    // Create process entry
-    Process *p = process_create(name, (uint32_t)user_space_code, bin_size);
-    if (p) {
-        current_process = p;
-        p->state = PROC_STATE_RUNNING;
-        append_history("DBG: Process registered");
-    }
-
-    // Set exit longjmp handler. If sys_exit is called, it returns here.
-    append_history("DBG: Saving context...");
-    
-    // Safety check: if process creation failed
-    if (p == (void *)0) {
-        append_history("DBG: Process create failed!");
-        return -3;
-    }
-
-    int sj_ret = setjmp(p->exit_env);
-    char sj_str[40];
-    const char *sj_lbl = "DBG: setjmp ret = ";
-    int p_sj = 0;
-    while (sj_lbl[p_sj]) { sj_str[p_sj] = sj_lbl[p_sj]; p_sj++; }
-    sj_str[p_sj++] = '0' + sj_ret;
-    sj_str[p_sj] = '\0';
-    append_history(sj_str);
-
-    if (sj_ret == 0) {
-        AppEntry entry = (AppEntry)user_space_code;
-        append_history("DBG: Jumping to entry...");
-        entry(out_buf, buf_size);
-        append_history("DBG: Returned from entry");
     } else {
-        append_history("DBG: Recovered from sys_exit");
+        /* Fallback to raw app directory and sector reading */
+        AppDirEntry dir[APP_DIR_MAX_ENTRIES];
+        int dir_count = load_app_dir(dir, APP_DIR_MAX_ENTRIES);
+        if (dir_count < 0) return -2; /* Disk error */
+
+        int found_idx = -1;
+        for (int i = 0; i < dir_count; i++) {
+            if (ldr_str_eq_ci(dir[i].name, name)) {
+                found_idx = i;
+                break;
+            }
+        }
+        if (found_idx < 0) return -1; /* Not found */
+
+        AppDirEntry *app = &dir[found_idx];
+        bin_size   = app->size;
+        uint32_t bin_sector = app->sector;
+
+        if (bin_size == 0 || bin_size > APP_MAX_BINARY_SIZE) return -2;
+
+        code = (uint8_t *)kmalloc((size_t)bin_size);
+        if (!code) return -3;
+
+        uint32_t bytes_loaded = 0;
+        uint32_t cur_sector   = bin_sector;
+        uint8_t  sector_buf[512];
+
+        while (bytes_loaded < bin_size) {
+            if (disk_read_sector(cur_sector, sector_buf) != 0) {
+                kfree(code);
+                return -2;
+            }
+            uint32_t remaining = bin_size - bytes_loaded;
+            uint32_t chunk     = (remaining < 512) ? remaining : 512;
+            for (uint32_t b = 0; b < chunk; b++) {
+                code[bytes_loaded + b] = sector_buf[b];
+            }
+            bytes_loaded += chunk;
+            cur_sector++;
+        }
     }
 
-    if (p) {
-        p->state = PROC_STATE_TERMINATED;
-        current_process = (void *)0;
+    /* 6. Create process and register in ready queue */
+    out_buf[0] = '\0';
+
+    Process *p = (void *)0;
+
+    /* Detect if loaded binary is an ELF executable */
+    if (bin_size >= 4 && code[0] == 0x7F && code[1] == 'E' && code[2] == 'L' && code[3] == 'F') {
+        /* Find a free slot in process table and reserve it */
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            if (process_table[i].state == PROC_STATE_UNUSED) {
+                p = &process_table[i];
+                p->state = PROC_STATE_CREATED;
+                break;
+            }
+        }
+
+        if (p == (void *)0) {
+            kfree(code);
+            append_history("DBG: Process table full!");
+            return -3;
+        }
+
+        uint32_t *pd = (void *)0;
+        uint32_t entry_point = elf_load(code, bin_size, p, &pd);
+        if (entry_point == 0) {
+            p->state = PROC_STATE_UNUSED;
+            kfree(code);
+            append_history("DBG: ELF parse failed!");
+            return -2;
+        }
+
+        /* Create the Ring 3 ELF process structure */
+        Process *p_ok = process_create_elf(p, name, entry_point, bin_size);
+        if (p_ok == (void *)0) {
+            p->state = PROC_STATE_UNUSED;
+            kfree(code);
+            append_history("DBG: ELF process creation failed!");
+            return -3;
+        }
+
+        /* Since segments are copied, the raw file buffer can be freed immediately */
+        kfree(code);
+    } else {
+        /* Determine privilege ring for legacy flat binaries: CRASH.APP runs in Ring 3 (user mode) */
+        uint8_t proc_ring = 0;
+        if (name[0] == 'C' && name[1] == 'R' && name[2] == 'A' &&
+            name[3] == 'S' && name[4] == 'H') {
+            proc_ring = 3;
+        }
+
+        p = process_create(name, (uint32_t)code, bin_size, proc_ring, 0, 0, 0);
+        if (p == (void *)0) {
+            kfree(code);
+            append_history("DBG: Legacy process creation failed!");
+            return -3;
+        }
     }
 
-    /* Null-terminate in case app forgot */
-    out_buf[buf_size - 1] = '\0';
-
+    // Link to window if there's a title match (case-insensitive substring)
+    for (int w = 0; w < NUM_WINDOWS; w++) {
+        if (window_order[w]) {
+            const char *title = window_order[w]->title;
+            int match = 0;
+            for (int i = 0; title[i] != '\0'; i++) {
+                int j = 0;
+                while (name[j] != '\0' && title[i + j] != '\0') {
+                    char c1 = name[j];
+                    char c2 = title[i + j];
+                    if (c1 >= 'a' && c1 <= 'z') c1 -= 32;
+                    if (c2 >= 'a' && c2 <= 'z') c2 -= 32;
+                    if (c1 != c2) break;
+                    j++;
+                }
+                if (name[j] == '\0' || (name[j] == '.' && name[j+1] == 'a' && name[j+2] == 'p' && name[j+3] == 'p')) {
+                    match = 1;
+                    break;
+                }
+            }
+            if (match) {
+                window_order[w]->pid = p->id;
+                window_order[w]->visible = 1;
+                focus_window(window_order[w]);
+                break;
+            }
+        }
+    }
+    
+    char launch_msg[64];
+    int p_idx = 0;
+    const char *lbl = "Launched background: ";
+    while (lbl[p_idx]) { launch_msg[p_idx] = lbl[p_idx]; p_idx++; }
+    int n_idx = 0;
+    while (name[n_idx] && p_idx < 63) { launch_msg[p_idx++] = name[n_idx++]; }
+    launch_msg[p_idx] = '\0';
+    append_history(launch_msg);
+    
     return 0;
 }
 

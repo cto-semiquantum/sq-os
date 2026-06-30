@@ -2,10 +2,17 @@
 
 uint8_t *draw_buffer = (uint8_t *)BACKBUFFER_ADDR;
 
-/* clear_backbuffer — zero the entire 320x200 backbuffer (16000 dwords) */
+/* SAFE_WRITE — always validate offset before writing to the backbuffer.
+ * Prevents stray writes from corrupting memory past 0x50000+64000. */
+#define SAFE_WRITE(off, col) \
+    do { if ((uint32_t)(off) < (uint32_t)VGA_LIMIT) draw_buffer[(off)] = (col); } while(0)
+
+/* clear_backbuffer — zero exactly 320x200 = 64000 bytes (16000 dwords).
+ * Writing exactly VGA_LIMIT / 4 dwords ensures no overrun. */
 void clear_backbuffer(void) {
     uint32_t *buf = (uint32_t *)BACKBUFFER_ADDR;
-    for (int i = 0; i < 16000; i++) {
+    /* Unrolled 4x for speed; 16000 iterations exactly */
+    for (int i = 0; i < (VGA_LIMIT / 4); i++) {
         buf[i] = 0;
     }
 }
@@ -75,32 +82,28 @@ static const uint8_t font8x8[59 * 8] = {
 
 void draw_pixel(int x, int y, uint8_t color) {
     if (x >= 0 && x < VGA_WIDTH && y >= 0 && y < VGA_HEIGHT) {
-        draw_buffer[y * VGA_WIDTH + x] = color;
+        SAFE_WRITE(y * VGA_WIDTH + x, color);
     }
 }
 
 void draw_rect(int x, int y, int width, int height, uint8_t color) {
-    // Clipping
-    if (x < 0) {
-        width += x;
-        x = 0;
-    }
-    if (y < 0) {
-        height += y;
-        y = 0;
-    }
-    if (x + width > VGA_WIDTH) {
-        width = VGA_WIDTH - x;
-    }
-    if (y + height > VGA_HEIGHT) {
-        height = VGA_HEIGHT - y;
-    }
+    /* Screen-space clipping — reject entirely out-of-bounds calls */
+    if (x < 0) { width  += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (x >= VGA_WIDTH || y >= VGA_HEIGHT) return;
+    if (x + width  > VGA_WIDTH)  width  = VGA_WIDTH  - x;
+    if (y + height > VGA_HEIGHT) height = VGA_HEIGHT - y;
     if (width <= 0 || height <= 0) return;
 
     for (int r = 0; r < height; r++) {
-        uint8_t *dest = &draw_buffer[(y + r) * VGA_WIDTH + x];
-        for (int c = 0; c < width; c++) {
-            dest[c] = color;
+        int base_offset = (y + r) * VGA_WIDTH + x;
+        /* Guard: if entire row is out-of-bounds, stop */
+        if ((uint32_t)base_offset >= (uint32_t)VGA_LIMIT) break;
+        /* Clamp column count so we never walk past end of framebuffer */
+        int cols = width;
+        if (base_offset + cols > VGA_LIMIT) cols = VGA_LIMIT - base_offset;
+        for (int c = 0; c < cols; c++) {
+            draw_buffer[base_offset + c] = color;
         }
     }
 }
@@ -121,14 +124,14 @@ void draw_char(int x, int y, char c, uint8_t color) {
         if (cy < 0 || cy >= VGA_HEIGHT) continue;
 
         uint8_t row_data = glyph[r];
-        uint8_t *dest = &draw_buffer[cy * VGA_WIDTH];
+        int base_offset = cy * VGA_WIDTH;
 
         for (int col = 0; col < 8; col++) {
             int cx = x + col;
             if (cx < 0 || cx >= VGA_WIDTH) continue;
 
             if (row_data & (0x80 >> col)) {
-                dest[cx] = color;
+                SAFE_WRITE(base_offset + cx, color);
             }
         }
     }
@@ -156,14 +159,14 @@ void draw_char_clipped(int x, int y, char c, uint8_t color, int min_x, int max_x
         if (cy < min_y || cy >= max_y || cy < 0 || cy >= VGA_HEIGHT) continue;
 
         uint8_t row_data = glyph[r];
-        uint8_t *dest = &draw_buffer[cy * VGA_WIDTH];
+        int base_offset = cy * VGA_WIDTH;
 
         for (int col = 0; col < 8; col++) {
             int cx = x + col;
             if (cx < min_x || cx >= max_x || cx < 0 || cx >= VGA_WIDTH) continue;
 
             if (row_data & (0x80 >> col)) {
-                dest[cx] = color;
+                SAFE_WRITE(base_offset + cx, color);
             }
         }
     }
@@ -181,17 +184,15 @@ void draw_text_clipped(int x, int y, const char *str, uint8_t color, int min_x, 
 }
 
 void swap_buffers(void) {
-    // Wait for vertical retrace (Vsync)
-    // First wait for any ongoing retrace to end
-    while (inb(0x3DA) & 0x08);
-    // Then wait for a new retrace to start
-    while (!(inb(0x3DA) & 0x08));
+    /* Vsync: wait for any current retrace to end, then wait for new one */
+    while ( inb(0x3DA) & 0x08);  /* wait for retrace-off */
+    while (!(inb(0x3DA) & 0x08)); /* wait for retrace-on  */
 
-    // Copy backbuffer (0x50000) to VGA framebuffer (0xA0000)
-    // 320 * 200 = 64000 bytes. 16000 dwords.
-    uint32_t *src = (uint32_t *)BACKBUFFER_ADDR;
-    uint32_t *dest = (uint32_t *)VGA_FRAMEBUFFER_ADDR;
-    for (int i = 0; i < 16000; i++) {
+    /* Copy exactly 64000 bytes (16000 dwords) from backbuffer → VGA framebuffer.
+     * Using dword copies is faster than byte copies on x86. */
+    const uint32_t *src  = (const uint32_t *)BACKBUFFER_ADDR;
+    uint32_t       *dest = (uint32_t *)VGA_FRAMEBUFFER_ADDR;
+    for (int i = 0; i < (VGA_LIMIT / 4); i++) {
         dest[i] = src[i];
     }
 }

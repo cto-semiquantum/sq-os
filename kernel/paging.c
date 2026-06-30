@@ -1,4 +1,6 @@
 #include "paging.h"
+#include "memory.h"
+#include <stddef.h>
 
 /* 4KB aligned page directory and page tables */
 uint32_t page_directory[1024] __attribute__((aligned(4096)));
@@ -50,4 +52,57 @@ uint8_t is_paging_enabled(void) {
 
 uint32_t get_page_directory_addr(void) {
     return (uint32_t)page_directory;
+}
+
+uint32_t *paging_create_user_directory(void **out_raw_pd) {
+    /* Allocate 2 pages (8KB) to guarantee a 4KB aligned start pointer */
+    uint8_t *raw_pd = (uint8_t *)kmalloc(4096 * 2);
+    if (!raw_pd) return (void *)0;
+
+    if (out_raw_pd) {
+        *out_raw_pd = raw_pd;
+    }
+
+    uint32_t *pd = (uint32_t *)(((uint32_t)raw_pd + 4095) & ~4095);
+
+    /* Zero the page directory */
+    for (int i = 0; i < 1024; i++) {
+        pd[i] = 0;
+    }
+
+    /* Copy Kernel mapping (first 4MB, entry 0) from default directory */
+    uint32_t *global_pd = (uint32_t *)get_page_directory_addr();
+    pd[0] = global_pd[0];
+
+    return pd;
+}
+
+void map_user_page(uint32_t *pd, uint32_t vaddr, uint32_t paddr, void **alloc_blocks, int *alloc_count) {
+    uint32_t pd_idx = vaddr >> 22;
+    uint32_t pt_idx = (vaddr >> 12) & 0x3FF;
+
+    uint32_t *pt;
+    if (!(pd[pd_idx] & 1)) {
+        /* Allocate 2 pages to guarantee a 4KB aligned page table start */
+        uint8_t *raw_pt = (uint8_t *)kmalloc(4096 * 2);
+        if (!raw_pt) return;
+        
+        if (alloc_blocks && alloc_count && *alloc_count < 30) {
+            alloc_blocks[(*alloc_count)++] = raw_pt;
+        }
+
+        uint32_t aligned_pt = ((uint32_t)raw_pt + 4095) & ~4095;
+
+        /* Zero the page table */
+        for (int i = 0; i < 1024; i++) {
+            ((uint32_t *)aligned_pt)[i] = 0;
+        }
+
+        /* Link page table in directory with attributes: User, R/W, Present (7) */
+        pd[pd_idx] = aligned_pt | 7;
+    }
+
+    pt = (uint32_t *)(pd[pd_idx] & ~4095);
+    /* Map page to physical address with attributes: User, R/W, Present (7) */
+    pt[pt_idx] = paddr | 7;
 }

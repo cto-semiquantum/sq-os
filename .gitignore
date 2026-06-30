@@ -5,3 +5,7 @@
 *.lst
 *.map
 null
+hello.elf
+my_as.exe
+*.log
+repo/

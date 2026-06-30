@@ -120,6 +120,10 @@ int fs_write_file(const char *name, const uint8_t *buffer, uint32_t size);
  * Returns number of bytes read, or -1 on error. */
 int fs_read_file(const char *name, uint8_t *buffer, uint32_t max_bytes);
 
+/* fs_delete_file — delete a file in the root directory by marking name[0] = 0xE5.
+ * Returns 0 on success, -1 on error/not found. */
+int fs_delete_file(const char *name);
+
 /* Cached BPB from boot sector (available after fat12_init() succeeds). */
 extern BPB g_bpb;
 

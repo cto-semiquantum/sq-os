@@ -67,7 +67,7 @@ void draw_welcome_content(Window *win) {
 
 
 void draw_files_content(Window *win) {
-    // White body
+    // White body00
     draw_rect(win->x + 4, win->y + 14, win->w - 8, win->h - 24, 15);
     // Separator line
     draw_rect(win->x + 4, win->y + 14, win->w - 8, 1, 8);
@@ -269,28 +269,40 @@ void redraw_desktop(void) {
     draw_rect(0, 190, 320, 10, 7);
     draw_rect(0, 190, 320, 1, 15); // Bevel top highlight line
 
-    // Draw Taskbar App Switcher
-    int tb_x = 70;
+    // === SQ Start Button (left side of taskbar) ===
+    draw_rect(2, 191, 30, 8, 11);    // Cyan start button
+    draw_rect(2, 191, 30, 1, 15);    // Top highlight
+    draw_rect(2, 191, 1, 8, 15);     // Left highlight
+    draw_rect(2, 198, 30, 1, 3);     // Bottom shadow
+    draw_rect(31, 191, 1, 8, 3);     // Right shadow
+    draw_text(7, 192, "SQ", 0);      // SQ label in black
+
+    // === Taskbar App Switcher (starts after SQ button) ===
+    int tb_x = 35;
     for (int i = 0; i < NUM_WINDOWS; i++) {
         Window *win = window_order[i];
         if (win->visible && win != &window_welcome) {
-            uint8_t btn_color = win->active ? 15 : 7;
-            uint8_t txt_color = win->active ? 0 : 8;
-            draw_rect(tb_x, 191, 40, 8, btn_color);
-            draw_rect(tb_x, 191, 40, 1, 15);
-            draw_rect(tb_x, 191, 1, 8, 15);
-            draw_rect(tb_x, 198, 40, 1, 8);
-            draw_rect(tb_x + 39, 191, 1, 8, 8);
-            
+            /* Active: dark pressed look (color 8 = dark gray body)
+             * Inactive: raised gray button */
+            uint8_t btn_color = win->active ? 8  : 7;
+            uint8_t txt_color = win->active ? 15 : 0;
+            draw_rect(tb_x, 191, 42, 8, btn_color);
+            /* Bevel — inverted for active (pressed) state */
+            draw_rect(tb_x,      191, 42, 1, win->active ? 8 : 15);
+            draw_rect(tb_x,      191, 1, 8,  win->active ? 8 : 15);
+            draw_rect(tb_x,      198, 42, 1, win->active ? 15 : 8);
+            draw_rect(tb_x + 41, 191, 1, 8,  win->active ? 15 : 8);
+
+            /* Show 5 chars of window title, centered */
             char short_title[6];
-            for(int j=0; j<5; j++) {
+            for (int j = 0; j < 5; j++) {
                 if (win->title[j] == '\0') { short_title[j]='\0'; break; }
                 short_title[j] = win->title[j];
             }
             short_title[5] = '\0';
             draw_text(tb_x + 2, 192, short_title, txt_color);
-            tb_x += 45;
-            if (tb_x > 220) break; // Don't overlap clock
+            tb_x += 46;
+            if (tb_x > 220) break;
         }
     }
 
@@ -343,6 +355,17 @@ void redraw_desktop(void) {
     // Icon: CALC (orange/red, X=85 Y=105)
     draw_icon_box(85, 105, 12);
     draw_text(85, 118, "CALC", 15);
+
+    // Icon: BROWSER (cyan, X=85 Y=145)
+    draw_icon_box(85, 145, 3);
+    draw_text(77, 158, "BROWSER", 15);
+
+    // Icon: HELLO (magenta, X=155 Y=25) - Dynamic Shortcut
+    DirEntry hello_entry;
+    if (fat12_init() == 0 && fat12_find_file("HELLO.ELF", &hello_entry) == 0) {
+        draw_icon_box(155, 25, 13);
+        draw_text(152, 38, "HELLO", 15);
+    }
 
     // 6. Draw all windows in Z-order
     draw_all_windows();
@@ -510,6 +533,13 @@ void handle_click_event(int cx, int cy) {
                 }
             }
 
+            if (win == &window_browser) {
+                int rel_x = cx - win->x;
+                int rel_y = cy - win->y;
+                extern void browser_handle_click(int rel_x, int rel_y);
+                browser_handle_click(rel_x, rel_y);
+            }
+
             // Check if close button is clicked
             int btn_x = win->x + win->w - 13;
             int btn_y = win->y + 3;
@@ -543,15 +573,16 @@ void handle_click_event(int cx, int cy) {
 
     // Check Taskbar clicks (Y: 191..199)
     if (cy >= 191 && cy <= 199) {
-        int tb_x = 70;
+        /* Skip the SQ start button region (X: 2..31) — reserved for future menu */
+        int tb_x = 35;
         for (int i = 0; i < NUM_WINDOWS; i++) {
             Window *win = window_order[i];
             if (win->visible && win != &window_welcome) {
-                if (cx >= tb_x && cx < tb_x + 40) {
+                if (cx >= tb_x && cx < tb_x + 42) {
                     focus_window(win);
                     return;
                 }
-                tb_x += 45;
+                tb_x += 46;
                 if (tb_x > 220) break;
             }
         }
@@ -607,6 +638,26 @@ void handle_click_event(int cx, int cy) {
             focus_window(&window_calc);
             return;
         }
+        // BROWSER icon: Y [140..170]
+        if (cy >= 140 && cy <= 170) {
+            window_browser.visible = 1;
+            focus_window(&window_browser);
+            return;
+        }
+    }
+
+    // Column 3 Icons (X [145..185])
+    if (cx >= 145 && cx <= 185) {
+        // HELLO icon: Y [20..50]
+        if (cy >= 20 && cy <= 50) {
+            DirEntry hello_entry;
+            if (fat12_find_file("HELLO.ELF", &hello_entry) == 0) {
+                extern int load_program(const char *name, char *out_buf, uint32_t buf_size);
+                char out_buf[64];
+                load_program("HELLO.ELF", out_buf, 64);
+            }
+            return;
+        }
     }
 }
 
@@ -615,6 +666,13 @@ void run_gui_loop(void) {
     init_windows();
     init_mouse();
     init_terminal_app();
+
+    extern volatile uint32_t system_ticks;
+    extern uint32_t current_fps;
+    extern uint32_t frames_rendered;
+    extern uint32_t last_fps_ticks;
+    last_fps_ticks = system_ticks;
+    frames_rendered = 0;
 
     while (1) {
         // Drain keyboard and mouse events non-blockingly
@@ -703,6 +761,9 @@ void run_gui_loop(void) {
                     calc_handle_key(scancode);
                 } else if (window_snake.active && window_snake.visible) {
                     snake_handle_key(scancode);
+                } else if (window_browser.active && window_browser.visible) {
+                    extern void browser_handle_key(uint8_t scancode);
+                    browser_handle_key(scancode);
                 }
             }
         }
@@ -710,11 +771,22 @@ void run_gui_loop(void) {
         // Render frame
         redraw_desktop();
 
+        frames_rendered++;
+        if (system_ticks - last_fps_ticks >= 18) {
+            current_fps = frames_rendered;
+            frames_rendered = 0;
+            last_fps_ticks = system_ticks;
+        }
+
         // Delay to throttle loop (Vsync double buffer is self-throttled,
         // but a minor sleep loop prevents CPU pinning on virtual machines)
         for (volatile int d = 0; d < 0x2000; d++);
     }
 }
+
+uint32_t current_fps = 0;
+uint32_t frames_rendered = 0;
+uint32_t last_fps_ticks = 0;
 
 // ------------------------------------------------------------------
 // draw_taskmanager_content — Task Manager and System Monitor Drawer
@@ -728,108 +800,117 @@ static void desktop_u32_to_dec(uint32_t val, char *out) {
 }
 
 void draw_taskmanager_content(Window *win) {
-    // 1. Draw body (white background)
+    /* === Left panel: Process list === */
     draw_rect(win->x + 4, win->y + 14, win->w - 8, win->h - 18, 15);
-    
-    // 2. Separator line under header
     draw_rect(win->x + 4, win->y + 14, win->w - 8, 1, 8);
 
-    // 3. Draw column titles (PID, NAME, STATUS, SIZE) - Aligned to 8px character boundaries
-    draw_text(win->x, win->y + 17, " PIDNAME   STAT  SIZE", 8);
+    draw_text(win->x + 4,  win->y + 17, "PID", 8);
+    draw_text(win->x + 24, win->y + 17, "NAME", 8);
+    draw_text(win->x + 72, win->y + 17, "STATE", 8);
+    draw_text(win->x + 120, win->y + 17, "SIZE", 8);
 
-    // 4. Print running processes
     int y_offset = 27;
     int proc_found = 0;
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_table[i].state != PROC_STATE_UNUSED && y_offset < win->h - 10) {
             proc_found = 1;
-            
-            // PID - starts at 8px (char index 1)
+
             char id_str[6];
             desktop_u32_to_dec(process_table[i].id, id_str);
-            draw_text(win->x + 8, win->y + y_offset, id_str, 0);
+            draw_text(win->x + 4,  win->y + y_offset, id_str, 0);
 
-            // Name - starts at 32px (char index 4)
-            char name_tmp[7];
-            int name_len = 0;
-            while (process_table[i].name[name_len] && name_len < 6) {
-                name_tmp[name_len] = process_table[i].name[name_len];
-                name_len++;
-            }
+            char name_tmp[7]; int name_len = 0;
+            while (process_table[i].name[name_len] && name_len < 6)
+                name_tmp[name_len] = process_table[i].name[name_len++];
             name_tmp[name_len] = '\0';
-            draw_text(win->x + 32, win->y + y_offset, name_tmp, 0);
+            draw_text(win->x + 24, win->y + y_offset, name_tmp, 0);
 
-            // State (CREAT, RUN, TERM) - starts at 88px (char index 11)
             const char *st_str = "UNK";
-            if (process_table[i].state == PROC_STATE_CREATED) st_str = "CREAT";
-            else if (process_table[i].state == PROC_STATE_RUNNING) st_str = "RUN  ";
-            else if (process_table[i].state == PROC_STATE_TERMINATED) st_str = "TERM ";
-            draw_text(win->x + 88, win->y + y_offset, st_str, 1); // Blue text
+            if (process_table[i].state == PROC_STATE_CREATED)    st_str = "NEW  ";
+            else if (process_table[i].state == PROC_STATE_RUNNING)    st_str = "RUN  ";
+            else if (process_table[i].state == PROC_STATE_TERMINATED) st_str = "DONE ";
+            draw_text(win->x + 72, win->y + y_offset, st_str, 1);
 
-            // Size - starts at 136px (char index 17)
             char sz_str[15];
             desktop_u32_to_dec(process_table[i].size, sz_str);
-            int l = 0; while (sz_str[l]) l++; sz_str[l] = 'B'; sz_str[l+1] = '\0';
-            draw_text(win->x + 136, win->y + y_offset, sz_str, 0);
+            int l = 0; while (sz_str[l]) l++; sz_str[l]='B'; sz_str[l+1]='\0';
+            draw_text(win->x + 120, win->y + y_offset, sz_str, 0);
 
             y_offset += 10;
         }
     }
-    
-    if (!proc_found) {
+
+    if (!proc_found)
         draw_text(win->x + 8, win->y + 35, "No active processes", 8);
-    }
 
-    // 5. Draw Vertical Separator line (shifted from 152 to 172 to prevent overlaps)
-    draw_rect(win->x + 172, win->y + 14, 1, win->h - 18, 8);
+    /* === Vertical separator === */
+    draw_rect(win->x + 165, win->y + 14, 1, win->h - 18, 8);
 
-    // 6. Draw System Stats on the Right (shifted from 158 to 178 to align inside right pane)
-    draw_text(win->x + 178, win->y + 17, "SYSTEM", 1); // Blue heading
+    /* === Right panel: System stats === */
+    int rx = win->x + 170; /* right panel X start */
+    int ry = win->y + 17;
 
-    // Paging status
-    if (is_paging_enabled()) {
-        draw_text(win->x + 178, win->y + 28, "PG: ON", 10); // Green ON
-    } else {
-        draw_text(win->x + 178, win->y + 28, "PG: OFF", 12); // Red OFF
-    }
+    draw_text(rx, ry, "SYSTEM STATS", 1);
+    ry += 12;
 
-    // Heap stats
-    char heap_str[24];
-    desktop_u32_to_dec((uint32_t)heap_used(), heap_str);
-    int hl = 0; while (heap_str[hl]) hl++; heap_str[hl++] = 'B'; heap_str[hl] = '\0';
-    
-    draw_text(win->x + 178, win->y + 42, "HEAP USED", 8);
-    draw_text(win->x + 178, win->y + 51, heap_str, 0);
+    /* FPS — always fresh from current_fps */
+    extern uint32_t current_fps;
+    char fps_str[12];
+    desktop_u32_to_dec(current_fps, fps_str);
+    int fp = 0; while(fps_str[fp]) fp++;
+    fps_str[fp++]='F'; fps_str[fp++]='P'; fps_str[fp++]='S'; fps_str[fp]=0;
+    draw_text(rx, ry, fps_str, 10); ry += 11;
 
-    // Syscalls stats
-    uint32_t total_syscalls = 0;
-    for (int k = 1; k < 6; k++) {
-        total_syscalls += get_syscall_count(k);
-    }
-    char sys_str[16];
-    desktop_u32_to_dec(total_syscalls, sys_str);
-    
-    draw_text(win->x + 178, win->y + 65, "SYSCALLS", 8);
-    draw_text(win->x + 178, win->y + 74, sys_str, 0);
-    
-    // Heap Free stats
-    HeapStats hs;
-    heap_stats(&hs);
-    char free_str[24];
-    desktop_u32_to_dec(hs.free_bytes, free_str);
-    int fl = 0; while (free_str[fl]) fl++; free_str[fl++] = 'B'; free_str[fl] = '\0';
-    
-    draw_text(win->x + 178, win->y + 88, "HEAP FREE", 8);
-    draw_text(win->x + 178, win->y + 97, free_str, 0);
-
+    /* Uptime in HH:MM:SS */
     extern volatile uint32_t system_ticks;
-    uint32_t uptime_sec = system_ticks / 18;
-    char up_str[16];
-    desktop_u32_to_dec(uptime_sec, up_str);
-    int ul = 0; while (up_str[ul]) ul++; up_str[ul++] = 's'; up_str[ul] = '\0';
-    
-    draw_text(win->x + 178, win->y + 111, "UPTIME", 8);
-    draw_text(win->x + 178, win->y + 120, up_str, 0);
+    uint32_t total_sec = system_ticks / 18;
+    uint32_t hh = total_sec / 3600;
+    uint32_t mm = (total_sec % 3600) / 60;
+    uint32_t ss = total_sec % 60;
+    char uptime[12];
+    /* Build HH:MM:SS manually */
+    uptime[0] = '0' + (hh / 10); uptime[1] = '0' + (hh % 10);
+    uptime[2] = ':';
+    uptime[3] = '0' + (mm / 10); uptime[4] = '0' + (mm % 10);
+    uptime[5] = ':';
+    uptime[6] = '0' + (ss / 10); uptime[7] = '0' + (ss % 10);
+    uptime[8] = '\0';
+    draw_text(rx, ry, "UP:", 8); draw_text(rx + 24, ry, uptime, 0); ry += 11;
+
+    /* Heap used */
+    char heap_str[24]; desktop_u32_to_dec((uint32_t)heap_used(), heap_str);
+    int hl = 0; while (heap_str[hl]) hl++; heap_str[hl++]='B'; heap_str[hl]='\0';
+    draw_text(rx, ry, "HPU:", 8); draw_text(rx + 32, ry, heap_str, 0); ry += 11;
+
+    /* Heap free */
+    HeapStats hs; heap_stats(&hs);
+    char free_str[24]; desktop_u32_to_dec(hs.free_bytes, free_str);
+    int fl = 0; while (free_str[fl]) fl++; free_str[fl++]='B'; free_str[fl]='\0';
+    draw_text(rx, ry, "HPF:", 8); draw_text(rx + 32, ry, free_str, 0); ry += 11;
+
+    /* Process count */
+    extern Process process_table[MAX_PROCESSES];
+    uint32_t proc_cnt = 0;
+    for (int j = 0; j < MAX_PROCESSES; j++)
+        if (process_table[j].state != PROC_STATE_UNUSED) proc_cnt++;
+    char proc_str[10]; desktop_u32_to_dec(proc_cnt, proc_str);
+    draw_text(rx, ry, "PRC:", 8); draw_text(rx + 32, ry, proc_str, 0); ry += 11;
+
+    /* Syscall count */
+    uint32_t total_syscalls = 0;
+    for (int k = 1; k < 6; k++) total_syscalls += get_syscall_count(k);
+    char sys_str[16]; desktop_u32_to_dec(total_syscalls, sys_str);
+    draw_text(rx, ry, "SYS:", 8); draw_text(rx + 32, ry, sys_str, 0); ry += 11;
+
+    /* Network TX */
+    extern uint32_t ne2k_tx_packets;
+    extern uint32_t ne2k_rx_packets;
+    char ntx_str[16]; desktop_u32_to_dec(ne2k_tx_packets, ntx_str);
+    draw_text(rx, ry, "NTX:", 8); draw_text(rx + 32, ry, ntx_str, 0); ry += 11;
+
+    /* Network RX */
+    char nrx_str[16]; desktop_u32_to_dec(ne2k_rx_packets, nrx_str);
+    draw_text(rx, ry, "NRX:", 8); draw_text(rx + 32, ry, nrx_str, 0);
 }
 
 // ------------------------------------------------------------------

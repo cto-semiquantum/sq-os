@@ -2,31 +2,17 @@
 """
 embed_apps.py — SQ-OS App Store Builder
 ========================================
-Writes the app directory (sector 50) and app binaries (sector 51+)
+Writes the app directory (sector 200) and app binaries (sector 201+)
 into os.img after the kernel has been linked.
-
-Disk layout managed by this script:
-
-  Sector 50        App directory  (8 × 64-byte entries = 512 bytes)
-  Sector 51        hello.bin      (flat 32-bit PIC binary)
-  Sector 52+       (future apps)
-
-App directory entry (64 bytes, little-endian):
-  [0:12]   char[12]   Filename, null-padded  e.g. b"HELLO.APP\\x00\\x00\\x00"
-  [12:16]  uint32_t   First sector on disk
-  [16:20]  uint32_t   Binary size in bytes
-  [20:64]  uint8_t[44] Reserved (zeros)
-
-Binary sectors:
-  Raw binary data, no header prefix.
-  The size is stored in the app directory entry.
+Also writes FAT12 structures at sector 500+ dynamically.
 """
 
 import struct, os, sys
 
 SECTOR_SIZE       = 512
-APP_DIR_SECTOR    = 80
-FIRST_APP_SECTOR  = 81   # hello.app starts here
+APP_DIR_SECTOR    = 200
+FIRST_APP_SECTOR  = 201   # Apps start here (safe area up to 499)
+RESERVED_SECTORS  = 500   # FAT12 filesystem starts at LBA 500
 
 
 def pad_sector(data: bytes) -> bytes:
@@ -42,16 +28,22 @@ def make_dir_entry(name: str, ext: str, attr: int, first_cluster: int, size: int
     ext_bytes = ext.encode('ascii')[:3].ljust(3, b' ')
     return struct.pack('<8s3sB10sHHHI', name_bytes, ext_bytes, attr, b'\x00'*10, 0, 0, first_cluster, size)
 
+
 def embed(disk_path: str, apps: list[tuple[str, str]]) -> None:
     """
     apps: list of (filename, binary_path) tuples.
-    filename: 8.3 ASCII name, e.g. "HELLO.APP"
+    filename: 8.3 ASCII name, e.g. "HELLO.ELF"
     """
     # Read disk
     with open(disk_path, 'rb') as f:
         disk = bytearray(f.read())
 
-    # Ensure disk covers at least the directory sector + all app sectors
+    # Ensure disk covers at least up to sector 2880 (1.44MB)
+    needed = 2880 * SECTOR_SIZE
+    if len(disk) < needed:
+        disk += bytearray(needed - len(disk))
+
+    # Read apps and build app directory records
     cur_sector = FIRST_APP_SECTOR
     app_binaries = []
     for (fname, fpath) in apps:
@@ -60,12 +52,11 @@ def embed(disk_path: str, apps: list[tuple[str, str]]) -> None:
         app_binaries.append((fname, cur_sector, data))
         cur_sector += (len(data) + SECTOR_SIZE - 1) // SECTOR_SIZE
 
-    # Ensure disk is large enough (at least up to sector 96 to cover FAT12 structure)
-    needed = max(cur_sector * SECTOR_SIZE, 96 * SECTOR_SIZE)
-    if len(disk) < needed:
-        disk += bytearray(needed - len(disk))
+    if cur_sector > RESERVED_SECTORS:
+        print(f"[embed_apps] ERROR: Apps overflow reserved sectors ({cur_sector} > {RESERVED_SECTORS})")
+        sys.exit(1)
 
-    # ---- Build app directory (sector 80) ----
+    # ---- Build and write app directory (sector 200) ----
     dir_sector = bytearray(SECTOR_SIZE)
     for idx, (fname, sector, data) in enumerate(app_binaries):
         if idx >= 8:
@@ -81,61 +72,91 @@ def embed(disk_path: str, apps: list[tuple[str, str]]) -> None:
     dir_off = APP_DIR_SECTOR * SECTOR_SIZE
     disk[dir_off : dir_off + SECTOR_SIZE] = dir_sector
 
-    # ---- Write each binary (for loader.c starting at sector 81) ----
+    # ---- Write each app binary into its raw sectors ----
     for (fname, sector, data) in app_binaries:
         padded = pad_sector(data)
         off = sector * SECTOR_SIZE
         disk[off : off + len(padded)] = padded
         print(f"[embed_apps] {fname:12s}  sector={sector}  size={len(data)} bytes")
 
-    # ---- Write FAT12 filesystem structures (FATs starting at sector 82, Root at sector 88) ----
+    # ---- Write FAT12 structures at LBA 500+ (matching BPB in boot.asm) ----
     fat_size = 3 * SECTOR_SIZE
     root_size = 4 * SECTOR_SIZE
-    
+
     hello_size = len(app_binaries[0][2]) if len(app_binaries) > 0 else 0
     notes_content = b"Welcome to SQ Notes!\nCreate notes here.\nPress SAVE to save."
     readme_content = b"=== SQ-OS README ===\nWelcome to Antigravity OS!\nEnjoy the Task Manager,\nCalculator, Notes, and Settings.\nSQ-OS rocks!"
-    
-    e1 = make_dir_entry("HELLO", "APP", 0x20, 2, hello_size)
+
+    e1 = make_dir_entry("HELLO", "ELF", 0x20, 2, hello_size)
     e2 = make_dir_entry("NOTES", "TXT", 0x20, 3, len(notes_content))
     e3 = make_dir_entry("README", "TXT", 0x20, 4, len(readme_content))
-    
+
     root_sector = bytearray(root_size)
     root_sector[0:32] = e1
     root_sector[32:64] = e2
     root_sector[64:96] = e3
-    
-    # Write empty/dummy FAT1 and FAT2
-    disk[82 * SECTOR_SIZE : 85 * SECTOR_SIZE] = bytearray(fat_size)
-    disk[85 * SECTOR_SIZE : 88 * SECTOR_SIZE] = bytearray(fat_size)
-    # Write Root directory
-    disk[88 * SECTOR_SIZE : 92 * SECTOR_SIZE] = root_sector
-    
-    # Write file data clusters starting at LBA 92
-    # Cluster 2 (LBA 92): hello.bin contents
-    if hello_size > 0:
-        disk[92 * SECTOR_SIZE : 93 * SECTOR_SIZE] = pad_sector(app_binaries[0][2])
-    # Cluster 3 (LBA 93): NOTES.TXT contents
-    disk[93 * SECTOR_SIZE : 94 * SECTOR_SIZE] = pad_sector(notes_content)
-    # Cluster 4 (LBA 94): README.TXT contents
-    disk[94 * SECTOR_SIZE : 95 * SECTOR_SIZE] = pad_sector(readme_content)
 
-    # Write back
+    fat1_off = RESERVED_SECTORS * SECTOR_SIZE
+    fat2_off = (RESERVED_SECTORS + 3) * SECTOR_SIZE
+    root_off = (RESERVED_SECTORS + 6) * SECTOR_SIZE
+    data_off = (RESERVED_SECTORS + 10) * SECTOR_SIZE
+
+    # Write FATs and Root directory
+    disk[fat1_off : fat1_off + fat_size] = bytearray(fat_size)
+    disk[fat2_off : fat2_off + fat_size] = bytearray(fat_size)
+    disk[root_off : root_off + root_size] = root_sector
+
+    # Write cluster contents (Cluster 2 = hello.elf, Cluster 3 = NOTES.TXT, Cluster 4 = README.TXT)
+    if hello_size > 0:
+        padded_hello = pad_sector(app_binaries[0][2])
+        disk[data_off : data_off + len(padded_hello)] = padded_hello
+
+    # NOTES.TXT sits at Cluster 3 (LBA 510 + size of HELLO.ELF sectors)
+    # But wait, in a standard FAT12 root entry, cluster numbers are 1-based or 2-based.
+    # The FAT12 driver expects files to be contiguous starting at their first cluster.
+    # Cluster 3 starts 1 sector after Cluster 2:
+    hello_sectors = (hello_size + SECTOR_SIZE - 1) // SECTOR_SIZE
+    if hello_sectors == 0:
+        hello_sectors = 1
+
+    notes_off = data_off + hello_sectors * SECTOR_SIZE
+    padded_notes = pad_sector(notes_content)
+    disk[notes_off : notes_off + len(padded_notes)] = padded_notes
+
+    # Update NOTES directory entry with its correct cluster index
+    notes_cluster = 2 + hello_sectors
+    e2 = make_dir_entry("NOTES", "TXT", 0x20, notes_cluster, len(notes_content))
+    root_sector[32:64] = e2
+
+    # README.TXT sits after NOTES
+    readme_off = notes_off + len(padded_notes)
+    padded_readme = pad_sector(readme_content)
+    disk[readme_off : readme_off + len(padded_readme)] = padded_readme
+
+    readme_cluster = notes_cluster + 1
+    e3 = make_dir_entry("README", "TXT", 0x20, readme_cluster, len(readme_content))
+    root_sector[64:96] = e3
+
+    # Rewrite the updated Root sector
+    disk[root_off : root_off + root_size] = root_sector
+
+    # Write back to os.img
     with open(disk_path, 'wb') as f:
         f.write(bytes(disk))
 
-    print(f"[embed_apps] Done. App directory at sector {APP_DIR_SECTOR}. FAT12 structures at sectors 82-94.")
+    total_fs_sectors = 10 + hello_sectors + 1 + 1
+    print(f"[embed_apps] Done. App directory LBA: {APP_DIR_SECTOR}. FAT12 LBA: {RESERVED_SECTORS}-{RESERVED_SECTORS + total_fs_sectors}.")
 
 
 if __name__ == '__main__':
-    # Apps to embed: list of (DISK_NAME, local_binary_path)
     apps = [
-        ("HELLO.APP", "hello.bin"),
+        ("HELLO.ELF", "hello.elf"),
+        ("CRASH.APP", "crash.bin"),
     ]
 
     disk_path = 'os.img'
     if not os.path.exists(disk_path):
-        print(f"[embed_apps] ERROR: {disk_path} not found — run build.bat first")
+        print(f"[embed_apps] ERROR: {disk_path} not found")
         sys.exit(1)
 
     embed(disk_path, apps)

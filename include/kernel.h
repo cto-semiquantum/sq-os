@@ -25,6 +25,16 @@ static inline void outw(uint16_t port, uint16_t value) {
     __asm__ volatile("outw %0, %1" :: "a"(value), "Nd"(port));
 }
 
+static inline uint32_t inl(uint16_t port) {
+    uint32_t value;
+    __asm__ volatile("inl %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static inline void outl(uint16_t port, uint32_t value) {
+    __asm__ volatile("outl %0, %1" :: "a"(value), "Nd"(port));
+}
+
 // Global kernel states / variable references
 extern volatile uint32_t cur_row;
 extern volatile uint32_t cur_col;

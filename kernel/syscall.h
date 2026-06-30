@@ -9,6 +9,7 @@
 #define SYS_FREE   3
 #define SYS_TIME   4
 #define SYS_EXIT   5
+#define SYS_SLEEP  6
 
 /* syscall_init — initialize syscall statistics and subsystem. */
 void syscall_init(void);

@@ -1,0 +1,1881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SQ-OS — Documentation & Architecture</title>
+  <meta name="description" content="Complete documentation, build guide, command reference, and system architecture for SQ-OS — a 32-bit x86 hobby operating system."/>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── Reset & Root ───────────────────────────────────────── */
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    :root {
+      --bg:       #070b12;
+      --surface:  #0b1120;
+      --card:     #0f1829;
+      --card2:    #111e33;
+      --border:   #1a2d4a;
+      --border2:  #243a5e;
+
+      --blue:     #3b82f6;
+      --blue2:    #60a5fa;
+      --purple:   #8b5cf6;
+      --purple2:  #a78bfa;
+      --cyan:     #06b6d4;
+      --green:    #10b981;
+      --green2:   #34d399;
+      --yellow:   #f59e0b;
+      --red:      #ef4444;
+      --orange:   #f97316;
+
+      --text:     #e2e8f0;
+      --text2:    #94a3b8;
+      --text3:    #64748b;
+
+      --glow-b:   rgba(59,130,246,0.12);
+      --glow-p:   rgba(139,92,246,0.12);
+      --glow-g:   rgba(16,185,129,0.10);
+
+      --radius:   14px;
+      --radius-sm:8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid background ────────────────────────────────────── */
+    body::before {
+      content:'';
+      position:fixed; inset:0; z-index:0;
+      background-image:
+        linear-gradient(rgba(59,130,246,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events:none;
+    }
+
+    /* ── Sidebar nav ────────────────────────────────────────── */
+    .sidebar {
+      position: fixed;
+      left: 0; top: 0; bottom: 0;
+      width: 240px;
+      background: rgba(11,17,32,0.97);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      z-index: 100;
+      padding: 28px 0 40px;
+      backdrop-filter: blur(12px);
+    }
+
+    .sidebar-logo {
+      padding: 0 22px 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .sidebar-logo-badge {
+      display: inline-flex; align-items:center; gap:8px;
+      background: linear-gradient(135deg,#1a3a6e,#1a1040);
+      border:1px solid var(--border); border-radius:8px;
+      padding: 6px 12px; font-size:11px; font-weight:700;
+      letter-spacing:2px; text-transform:uppercase; color:var(--cyan);
+      margin-bottom:8px;
+    }
+    .sidebar-title { font-size:18px; font-weight:800; color:#fff; }
+    .sidebar-sub   { font-size:11px; color:var(--text3); font-family:'JetBrains Mono',monospace; }
+
+    .nav-group { padding: 4px 0; }
+    .nav-group-label {
+      font-size:10px; font-weight:700; letter-spacing:2.5px;
+      text-transform:uppercase; color:var(--text3);
+      padding: 10px 22px 4px;
+    }
+    .nav-link {
+      display:flex; align-items:center; gap:9px;
+      padding:7px 22px; font-size:13px; font-weight:500;
+      color:var(--text2); text-decoration:none;
+      border-left:2px solid transparent;
+      transition: all .15s ease;
+    }
+    .nav-link:hover { color:#fff; background:rgba(59,130,246,.08); border-left-color:var(--blue); }
+    .nav-link.active { color:var(--blue2); background:rgba(59,130,246,.12); border-left-color:var(--blue); }
+    .nav-icon { font-size:14px; opacity:.8; }
+
+    /* ── Main content ───────────────────────────────────────── */
+    .main {
+      margin-left: 240px;
+      position: relative; z-index:1;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────── */
+    .hero {
+      padding: 80px 60px 60px;
+      background: linear-gradient(160deg, rgba(59,130,246,.06) 0%, rgba(139,92,246,.04) 50%, transparent 100%);
+      border-bottom: 1px solid var(--border);
+      position: relative; overflow:hidden;
+    }
+    .hero::after {
+      content:'';
+      position:absolute; right:-100px; top:-100px;
+      width:500px; height:500px; border-radius:50%;
+      background: radial-gradient(circle, rgba(59,130,246,.07) 0%, transparent 70%);
+      pointer-events:none;
+    }
+    .hero-eyebrow {
+      display:inline-flex; align-items:center; gap:8px;
+      background:rgba(59,130,246,.1); border:1px solid rgba(59,130,246,.25);
+      border-radius:100px; padding:4px 14px;
+      font-size:11px; font-weight:700; letter-spacing:2px;
+      text-transform:uppercase; color:var(--blue2); margin-bottom:20px;
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 4vw, 3.8rem);
+      font-weight:900; line-height:1.1;
+      background: linear-gradient(135deg,#fff 0%,var(--blue2) 45%,var(--purple2) 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text; margin-bottom:16px;
+    }
+    .hero-desc { font-size:1.05rem; color:var(--text2); max-width:620px; margin-bottom:32px; }
+
+    .hero-badges { display:flex; flex-wrap:wrap; gap:10px; }
+    .badge {
+      display:inline-flex; align-items:center; gap:6px;
+      border:1px solid var(--border2); border-radius:8px;
+      padding:6px 14px; font-size:12px; font-weight:600;
+      font-family:'JetBrains Mono',monospace;
+      background: rgba(255,255,255,.03);
+    }
+    .badge.blue  { color:var(--blue2);   border-color:rgba(59,130,246,.3); }
+    .badge.purple{ color:var(--purple2); border-color:rgba(139,92,246,.3); }
+    .badge.green { color:var(--green2);  border-color:rgba(16,185,129,.3); }
+    .badge.yellow{ color:var(--yellow);  border-color:rgba(245,158,11,.3); }
+    .badge.red   { color:var(--red);     border-color:rgba(239,68,68,.3); }
+    .badge.cyan  { color:var(--cyan);    border-color:rgba(6,182,212,.3); }
+
+    /* ── Stats grid ─────────────────────────────────────────── */
+    .stats-grid {
+      display:grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
+      gap:1px; background:var(--border);
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+    }
+    .stat-item {
+      background:var(--surface); padding:22px 28px;
+    }
+    .stat-val {
+      font-size:2rem; font-weight:900;
+      background: linear-gradient(90deg,var(--blue2),var(--purple2));
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text; line-height:1;
+    }
+    .stat-lbl {
+      font-size:11px; color:var(--text3); text-transform:uppercase;
+      letter-spacing:1.5px; margin-top:4px;
+    }
+
+    /* ── Section wrapper ────────────────────────────────────── */
+    .section { padding: 64px 60px; border-bottom:1px solid var(--border); }
+    .section:last-child { border-bottom:none; }
+
+    .section-header { margin-bottom:36px; }
+    .section-label {
+      font-size:11px; font-weight:700; letter-spacing:3px;
+      text-transform:uppercase; color:var(--blue); margin-bottom:8px;
+    }
+    .section-title { font-size:1.8rem; font-weight:800; color:#fff; }
+    .section-sub   { font-size:.95rem; color:var(--text2); margin-top:6px; }
+
+    /* ── Cards grid ─────────────────────────────────────────── */
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+    .cards-2 { grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+
+    .card {
+      background:var(--card); border:1px solid var(--border);
+      border-radius:var(--radius); padding:22px;
+      transition:all .2s ease; position:relative; overflow:hidden;
+    }
+    .card::before {
+      content:''; position:absolute; inset:0; opacity:0;
+      background:var(--glow-b); transition:opacity .2s;
+    }
+    .card:hover { border-color:var(--blue); transform:translateY(-2px); }
+    .card:hover::before { opacity:1; }
+
+    .card.purple:hover { border-color:var(--purple); }
+    .card.purple::before { background:var(--glow-p); }
+    .card.green:hover  { border-color:var(--green); }
+    .card.green::before  { background:var(--glow-g); }
+    .card.yellow:hover { border-color:var(--yellow); }
+    .card.red:hover    { border-color:var(--red); }
+    .card.cyan:hover   { border-color:var(--cyan); }
+
+    .card-icon { font-size:26px; margin-bottom:10px; }
+    .card-title { font-size:14px; font-weight:700; color:#fff; margin-bottom:4px; }
+    .card-sub   { font-size:11px; color:var(--text3); font-family:'JetBrains Mono',monospace; margin-bottom:10px; }
+    .card-desc  { font-size:12.5px; color:var(--text2); line-height:1.6; }
+
+    .tags { display:flex; flex-wrap:wrap; gap:5px; margin-top:12px; }
+    .tag {
+      font-size:9.5px; font-weight:700; padding:2px 8px;
+      border-radius:100px; border:1px solid; font-family:'JetBrains Mono',monospace;
+    }
+    .tag.blue   { color:var(--blue);   border-color:#1d4ed866; background:#1e3a5f33; }
+    .tag.purple { color:var(--purple); border-color:#6d28d966; background:#2e106544; }
+    .tag.green  { color:var(--green);  border-color:#05966944; background:#05966922; }
+    .tag.yellow { color:var(--yellow); border-color:#d9770644; background:#d9770622; }
+    .tag.red    { color:var(--red);    border-color:#b91c1c44; background:#b91c1c22; }
+    .tag.cyan   { color:var(--cyan);   border-color:#0891b244; background:#0891b222; }
+    .tag.orange { color:var(--orange); border-color:#c2410c44; background:#c2410c22; }
+
+    /* ── Code block ─────────────────────────────────────────── */
+    .code-block {
+      background:#040810; border:1px solid var(--border);
+      border-radius:var(--radius-sm); overflow:hidden;
+      margin: 16px 0;
+    }
+    .code-header {
+      display:flex; align-items:center; justify-content:space-between;
+      background:rgba(255,255,255,.03); border-bottom:1px solid var(--border);
+      padding:10px 18px;
+    }
+    .code-lang {
+      font-size:11px; font-weight:600; color:var(--text3);
+      font-family:'JetBrains Mono',monospace; letter-spacing:1px;
+    }
+    .code-dots { display:flex; gap:5px; }
+    .code-dot  { width:10px; height:10px; border-radius:50%; }
+    .code-dot:nth-child(1){ background:#ef4444; }
+    .code-dot:nth-child(2){ background:#f59e0b; }
+    .code-dot:nth-child(3){ background:#10b981; }
+    pre {
+      padding:20px 22px; font-family:'JetBrains Mono',monospace;
+      font-size:13px; line-height:1.7; overflow-x:auto;
+      color:#c9d8f0;
+    }
+    .c-kw  { color:#c792ea; }   /* keywords */
+    .c-fn  { color:#82aaff; }   /* functions */
+    .c-str { color:#c3e88d; }   /* strings */
+    .c-cmt { color:#546e7a; font-style:italic; }
+    .c-num { color:#f78c6c; }   /* numbers */
+    .c-pre { color:#ffcb6b; }   /* preprocessor */
+
+    /* ── Step list ──────────────────────────────────────────── */
+    .steps { list-style:none; display:flex; flex-direction:column; gap:0; }
+    .step {
+      display:flex; gap:20px;
+      padding:20px 0; border-bottom:1px solid var(--border);
+    }
+    .step:last-child { border-bottom:none; }
+    .step-num {
+      flex-shrink:0; width:36px; height:36px; border-radius:50%;
+      background:linear-gradient(135deg,var(--blue),var(--purple));
+      display:flex; align-items:center; justify-content:center;
+      font-size:14px; font-weight:800; color:#fff; margin-top:2px;
+    }
+    .step-content h4 { font-size:15px; font-weight:700; color:#fff; margin-bottom:4px; }
+    .step-content p  { font-size:13px; color:var(--text2); }
+
+    /* ── Command table ──────────────────────────────────────── */
+    .cmd-table { width:100%; border-collapse:collapse; }
+    .cmd-table th {
+      text-align:left; padding:10px 16px;
+      font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+      color:var(--text3); background:rgba(255,255,255,.02);
+      border-bottom:1px solid var(--border);
+    }
+    .cmd-table td {
+      padding:12px 16px; border-bottom:1px solid rgba(26,45,74,.5);
+      vertical-align:top; font-size:13px;
+    }
+    .cmd-table tr:hover td { background:rgba(59,130,246,.04); }
+    .cmd-table tr:last-child td { border-bottom:none; }
+    .cmd-name {
+      font-family:'JetBrains Mono',monospace; font-size:13px;
+      font-weight:600; color:var(--green2);
+    }
+    .cmd-desc { color:var(--text2); }
+    .cmd-ex   {
+      font-family:'JetBrains Mono',monospace; font-size:11px;
+      color:var(--text3); margin-top:3px;
+    }
+
+    /* ── Arch layer ─────────────────────────────────────────── */
+    .arch-section { margin-bottom:24px; }
+    .arch-label {
+      font-size:10px; font-weight:700; letter-spacing:2.5px;
+      text-transform:uppercase; color:var(--text3);
+      padding:4px 14px; border-left:2px solid var(--border2);
+      margin-bottom:12px;
+    }
+    .arch-row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:4px; }
+
+    .arch-card {
+      flex:1; min-width:150px;
+      background:var(--card); border:1px solid var(--border);
+      border-radius:10px; padding:16px;
+      transition:all .2s; position:relative; overflow:hidden;
+    }
+    .arch-card:hover { transform:translateY(-2px); }
+
+    .arch-card.blue  { border-color:#1d4ed844; }
+    .arch-card.blue:hover  { border-color:var(--blue); }
+    .arch-card.purple{ border-color:#6d28d944; }
+    .arch-card.purple:hover{ border-color:var(--purple); }
+    .arch-card.cyan  { border-color:#0891b244; }
+    .arch-card.cyan:hover  { border-color:var(--cyan); }
+    .arch-card.green { border-color:#05966944; }
+    .arch-card.green:hover { border-color:var(--green); }
+    .arch-card.red   { border-color:#b91c1c44; }
+    .arch-card.red:hover   { border-color:var(--red); }
+    .arch-card.yellow{ border-color:#d9770644; }
+    .arch-card.yellow:hover{ border-color:var(--yellow); }
+    .arch-card.orange{ border-color:#c2410c44; }
+    .arch-card.orange:hover{ border-color:var(--orange); }
+
+    .arch-card-icon  { font-size:20px; margin-bottom:6px; }
+    .arch-card-title { font-size:12px; font-weight:700; color:#fff; margin-bottom:2px; }
+    .arch-card-file  { font-family:'JetBrains Mono',monospace; font-size:9.5px; color:var(--text3); }
+
+    .arch-connector {
+      display:flex; justify-content:center; height:28px; align-items:center;
+      position:relative;
+    }
+    .arch-connector::before {
+      content:''; position:absolute; left:50%; top:0; bottom:0;
+      width:1px; background:linear-gradient(to bottom,transparent,var(--border),transparent);
+    }
+    .arch-connector-dot {
+      background:var(--card); border:1px solid var(--border2);
+      border-radius:50%; width:22px; height:22px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:11px; color:var(--text3); z-index:1;
+    }
+
+    /* ── Ring 3 flow ────────────────────────────────────────── */
+    .flow-box {
+      background:var(--card2); border:1px solid var(--border);
+      border-radius:8px; padding:10px 16px;
+      font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600;
+      white-space:nowrap;
+    }
+    .flow-box.high   { border-color:#ef444466; color:var(--red); }
+    .flow-box.normal { border-color:#3b82f666; color:var(--blue); }
+    .flow-box.low    { border-color:#f59e0b66; color:var(--yellow); }
+    .flow-box.sleep  { border-color:#8b5cf666; color:var(--purple); }
+    .flow-box.ready  { border-color:#10b98166; color:var(--green); }
+    .flow-box.run    { border-color:#f9731666; color:var(--orange); }
+    .flow-box.term   { border-color:#ef444466; color:var(--red); background:#b91c1c11; }
+    .flow-box.r3     { border-color:#8b5cf699; color:var(--purple2); background:#1e105544; }
+    .flow-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    .flow-arrow { color:var(--text3); font-weight:700; font-size:14px; }
+
+    /* ── Milestone timeline ─────────────────────────────────── */
+    .timeline { position:relative; padding-left:24px; }
+    .timeline::before {
+      content:''; position:absolute; left:6px; top:8px; bottom:8px;
+      width:2px; background:linear-gradient(to bottom,var(--blue),var(--purple),var(--green));
+      border-radius:4px;
+    }
+    .tl-item { position:relative; margin-bottom:24px; }
+    .tl-item::before {
+      content:''; position:absolute; left:-21px; top:5px;
+      width:10px; height:10px; border-radius:50%;
+      background:var(--blue); border:2px solid var(--bg);
+      box-shadow:0 0 8px var(--blue);
+    }
+    .tl-item.done::before { background:var(--green); box-shadow:0 0 8px var(--green); }
+    .tl-item.wip::before  { background:var(--yellow); box-shadow:0 0 8px var(--yellow); animation:pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .tl-title { font-size:14px; font-weight:700; color:#fff; margin-bottom:3px; }
+    .tl-desc  { font-size:12.5px; color:var(--text2); }
+    .tl-badge {
+      display:inline-block; font-size:9px; font-weight:700; padding:1px 8px;
+      border-radius:100px; border:1px solid; margin-left:8px;
+      font-family:'JetBrains Mono',monospace; letter-spacing:1px; vertical-align:middle;
+    }
+    .tl-badge.done  { color:var(--green); border-color:var(--green); background:#10b98118; }
+    .tl-badge.wip   { color:var(--yellow); border-color:var(--yellow); background:#f59e0b18; }
+    .tl-badge.next  { color:var(--text3); border-color:var(--text3); background:transparent; }
+
+    /* ── Alert boxes ────────────────────────────────────────── */
+    .alert {
+      border-radius:var(--radius-sm); padding:16px 20px;
+      border:1px solid; margin:16px 0; display:flex; gap:12px;
+    }
+    .alert.info  { background:#1e3a5f22; border-color:#3b82f644; color:var(--blue2); }
+    .alert.tip   { background:#05966922; border-color:#10b98144; color:var(--green2); }
+    .alert.warn  { background:#d9770622; border-color:#f59e0b44; color:var(--yellow); }
+    .alert-icon  { font-size:18px; flex-shrink:0; margin-top:1px; }
+    .alert p     { font-size:13px; line-height:1.6; }
+    .alert strong{ font-weight:700; }
+
+    /* ── Footer ─────────────────────────────────────────────── */
+    footer {
+      margin-left:240px; padding:32px 60px;
+      border-top:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
+      font-size:12px; color:var(--text3);
+      font-family:'JetBrains Mono',monospace;
+      flex-wrap:wrap; gap:12px;
+    }
+    footer a { color:var(--blue2); text-decoration:none; }
+
+    /* ── Responsive ─────────────────────────────────────────── */
+    @media(max-width:900px){
+      .sidebar { display:none; }
+      .main, footer { margin-left:0; }
+      .hero, .section { padding:40px 24px; }
+      .arch-row { flex-direction:column; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════ SIDEBAR NAV ════════════════════ -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-badge">⚡ SQ-OS</div>
+    <div class="sidebar-title">Documentation</div>
+    <div class="sidebar-sub">v3.0 · x86 · Ring 3</div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Getting Started</div>
+    <a href="#overview"        class="nav-link active"><span class="nav-icon">🏠</span> Overview</a>
+    <a href="#quickstart"      class="nav-link"><span class="nav-icon">🚀</span> Quick Start</a>
+    <a href="#build"           class="nav-link"><span class="nav-icon">🔨</span> Build Guide</a>
+    <a href="#run"             class="nav-link"><span class="nav-icon">▶️</span> Running the OS</a>
+    <a href="#hello-tutorial"  class="nav-link"><span class="nav-icon">👋</span> Hello World Tutorial</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Usage</div>
+    <a href="#commands"        class="nav-link"><span class="nav-icon">⌨️</span> Terminal Commands</a>
+    <a href="#apps"            class="nav-link"><span class="nav-icon">📦</span> Applications</a>
+    <a href="#ring3-test"      class="nav-link"><span class="nav-icon">🧪</span> Ring 3 Test</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">SDK &amp; Dev Guide</div>
+    <a href="#sdk-guide"        class="nav-link"><span class="nav-icon">⚙️</span> SDK Guide</a>
+    <a href="#dev-guide"        class="nav-link"><span class="nav-icon">🛠️</span> Developer Guide</a>
+    <a href="#package-manager"  class="nav-link"><span class="nav-icon">📦</span> Package Manager</a>
+    <a href="#regression"       class="nav-link"><span class="nav-icon">✅</span> Regression Checklist</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Architecture</div>
+    <a href="#arch"            class="nav-link"><span class="nav-icon">🗺️</span> System Diagram</a>
+    <a href="#ring3"           class="nav-link"><span class="nav-icon">🔒</span> Ring 3 User Mode</a>
+    <a href="#scheduler"       class="nav-link"><span class="nav-icon">⚡</span> Scheduler</a>
+    <a href="#memory"          class="nav-link"><span class="nav-icon">🧱</span> Memory Layout</a>
+    <a href="#network"         class="nav-link"><span class="nav-icon">🌐</span> Network Stack</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Development</div>
+    <a href="#files"           class="nav-link"><span class="nav-icon">📁</span> File Structure</a>
+    <a href="#syscalls"        class="nav-link"><span class="nav-icon">🔌</span> Syscall Table</a>
+    <a href="#roadmap"         class="nav-link"><span class="nav-icon">🗓️</span> Roadmap</a>
+  </div>
+</nav>
+
+<!-- ════════════════════ MAIN ════════════════════ -->
+<main class="main">
+
+  <!-- ── Hero ─────────────────────────────────────────────── -->
+  <section class="hero" id="overview">
+    <div class="hero-eyebrow">📚 Documentation &amp; Architecture</div>
+    <h1>SQ-OS<br/>Operating System</h1>
+    <p class="hero-desc">
+      A 32-bit x86 hobby operating system built from scratch in C and Assembly.
+      Runs in QEMU with a full GUI, preemptive scheduler, Ring 3 user mode,
+      TCP/IP networking, FAT12 filesystem, and a growing app store.
+    </p>
+    <div class="hero-badges">
+      <span class="badge blue">⚙️ x86 Protected Mode</span>
+      <span class="badge purple">🔒 Ring 3 User Mode</span>
+      <span class="badge green">⚡ Preemptive Scheduler</span>
+      <span class="badge cyan">🌐 TCP/IP Stack</span>
+      <span class="badge yellow">🖥️ 320×200 VGA GUI</span>
+      <span class="badge red">💾 FAT12 Filesystem</span>
+    </div>
+  </section>
+
+  <!-- ── Stats ─────────────────────────────────────────────── -->
+  <div class="stats-grid">
+    <div class="stat-item"><div class="stat-val">28</div><div class="stat-lbl">Source Files</div></div>
+    <div class="stat-item"><div class="stat-val">6</div><div class="stat-lbl">GDT Entries</div></div>
+    <div class="stat-item"><div class="stat-val">R3</div><div class="stat-lbl">User Mode</div></div>
+    <div class="stat-item"><div class="stat-val">4</div><div class="stat-lbl">Priority Levels</div></div>
+    <div class="stat-item"><div class="stat-val">6</div><div class="stat-lbl">Syscalls</div></div>
+    <div class="stat-item"><div class="stat-val">32M</div><div class="stat-lbl">RAM</div></div>
+    <div class="stat-item"><div class="stat-val">1.44MB</div><div class="stat-lbl">Floppy Image</div></div>
+    <div class="stat-item"><div class="stat-val">100Hz</div><div class="stat-lbl">PIT Timer</div></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       QUICK START
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="quickstart">
+    <div class="section-header">
+      <div class="section-label">Getting Started</div>
+      <div class="section-title">Quick Start</div>
+      <div class="section-sub">Boot SQ-OS in under 60 seconds</div>
+    </div>
+
+    <div class="alert info">
+      <div class="alert-icon">ℹ️</div>
+      <p><strong>Prerequisites:</strong> NASM, Python 3, i686-elf cross-compiler, QEMU installed and available in PATH.</p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Clone / Open the project</h4>
+          <p>Navigate to the SQ-OS project directory in your terminal.</p>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">CMD / POWERSHELL</span>
+              <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+            </div>
+            <pre>cd C:\Users\Harsh\OneDrive\Desktop\SQ-OS</pre>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Build the OS image</h4>
+          <p>Run the build script. It compiles all C and ASM files, links the kernel, and produces <code>os.img</code>.</p>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">BATCH</span>
+              <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+            </div>
+            <pre>.\build.bat</pre>
+          </div>
+          <p>Expected output: <strong>Build Successful: os.img</strong></p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>Launch in QEMU</h4>
+          <p>Run QEMU with the 1.44MB floppy image and 32MB RAM. The GUI desktop will appear in a new window.</p>
+          <div class="code-block">
+            <div class="code-header">
+              <span class="code-lang">POWERSHELL</span>
+              <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+            </div>
+            <pre>qemu-system-i386 -drive format=raw,file=os.img -m 32M</pre>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h4>Explore the Desktop</h4>
+          <p>The SQ-OS GUI boots with a taskbar, start menu, and clock. Click the <strong>SQ</strong> button or open the Terminal to start using it.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       BUILD GUIDE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="build">
+    <div class="section-header">
+      <div class="section-label">Build System</div>
+      <div class="section-title">Build Guide</div>
+      <div class="section-sub">How build.bat compiles and links SQ-OS</div>
+    </div>
+
+    <div class="cards cards-2">
+      <div class="card">
+        <div class="card-icon">🔧</div>
+        <div class="card-title">Toolchain Required</div>
+        <div class="card-desc">
+          <br/>
+          <strong style="color:#fff">NASM</strong> — Assembles <code>.asm</code> files to flat binaries and ELF32 objects<br/><br/>
+          <strong style="color:#fff">i686-elf-gcc</strong> — Cross-compiler that produces 32-bit freestanding C objects (no libc, no OS ABI)<br/><br/>
+          <strong style="color:#fff">i686-elf-ld</strong> — Links all <code>.o</code> files into <code>kernel.bin</code> using <code>linker.ld</code><br/><br/>
+          <strong style="color:#fff">Python 3</strong> — Runs <code>gen_wallpaper.py</code> and <code>embed_apps.py</code> helper scripts<br/><br/>
+          <strong style="color:#fff">QEMU</strong> — Emulates an i386 PC to boot the OS image
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📋</div>
+        <div class="card-title">Build Steps (in order)</div>
+        <div class="card-desc">
+          <br/>
+          <span style="color:var(--yellow)">Step 0</span> — Generate wallpaper pixel data (<code>gen_wallpaper.py</code>)<br/><br/>
+          <span style="color:var(--yellow)">Step 1</span> — Assemble <code>boot.asm</code> → <code>boot.bin</code> (512-byte MBR)<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Assemble <code>hello.asm</code> + <code>crash.asm</code> → flat PIC binaries<br/><br/>
+          <span style="color:var(--blue2)">Step 2</span> — Assemble <code>entry.asm</code> → <code>entry.o</code> (ELF32)<br/><br/>
+          <span style="color:var(--blue2)">Step 3</span> — Compile all 26 C source files → <code>.o</code> objects<br/><br/>
+          <span style="color:var(--green2)">Step 4</span> — Link everything → <code>kernel.bin</code><br/><br/>
+          <span style="color:var(--green2)">Step 5</span> — Concatenate: <code>boot.bin + kernel.bin</code> → <code>os.img</code><br/><br/>
+          <span style="color:var(--cyan)">Step 6</span> — Pad to 1.44MB (2880 sectors × 512 bytes)<br/><br/>
+          <span style="color:var(--cyan)">Step 7</span> — Embed app binaries at sector 120+ (<code>embed_apps.py</code>)
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block" style="margin-top:24px">
+      <div class="code-header">
+        <span class="code-lang">KEY COMPILER FLAGS</span>
+        <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+      </div>
+      <pre><span class="c-pre">CFLAGS</span> = -c -m32 -ffreestanding -fno-pie -fno-stack-protector -O2 -Iinclude -Idrivers -Ifs -Ikernel
+
+<span class="c-cmt">; -m32              → 32-bit i386 output
+; -ffreestanding    → No libc, no OS runtime
+; -fno-pie          → No position-independent code (flat binary)
+; -fno-stack-protector → No stack canaries (no libc support)
+; -O2               → Optimised code</span></pre>
+    </div>
+
+    <div class="alert tip">
+      <div class="alert-icon">💡</div>
+      <p><strong>Tip:</strong> If QEMU is running when you build, the build will fail because <code>os.img</code> is locked. Close QEMU first, then run <code>.\build.bat</code>.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RUNNING
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="run">
+    <div class="section-header">
+      <div class="section-label">Emulation</div>
+      <div class="section-title">Running the OS</div>
+      <div class="section-sub">QEMU launch options and debug modes</div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">STANDARD LAUNCH</span>
+        <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+      </div>
+      <pre><span class="c-cmt"># Normal GUI boot</span>
+qemu-system-i386 -drive format=raw,file=os.img -m 32M
+
+<span class="c-cmt"># From PowerShell (non-blocking, separate window)</span>
+Start-Process qemu-system-i386 -ArgumentList <span class="c-str">"-drive format=raw,file=os.img -m 32M"</span>
+
+<span class="c-cmt"># Debug mode: log all CPU interrupts to qemu.log</span>
+qemu-system-i386 -drive format=raw,file=os.img -m 32M -d int -D qemu.log
+
+<span class="c-cmt"># Serial console output</span>
+qemu-system-i386 -drive format=raw,file=os.img -m 32M -serial file:serial.log
+
+<span class="c-cmt"># With network (for ping/http)</span>
+qemu-system-i386 -drive format=raw,file=os.img -m 32M -net nic,model=ne2k_pci -net user</pre>
+    </div>
+
+    <div class="alert warn">
+      <div class="alert-icon">⚠️</div>
+      <p><strong>Session 0 Isolation:</strong> On Windows, running QEMU from a background agent/service creates the window in Session 0 (invisible). Always launch QEMU from your own interactive terminal window.</p>
+    </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       HELLO WORLD TUTORIAL
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="hello-tutorial">
+    <div class="section-header">
+      <div class="section-label">Development Tutorial</div>
+      <div class="section-title">"Hello World" C Tutorial</div>
+      <div class="section-sub">Write, compile, and run your first Ring 3 user application on SQ-OS</div>
+    </div>
+
+    <p style="color:var(--text2);margin-bottom:16px;">
+      SQ-OS provides a fully isolated user space environment (Ring 3). With the new C SDK, you can write standard C programs, compile them into standard ELF executables, and run them directly in our multitasking shell.
+    </p>
+
+    <ol class="steps">
+      <li class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Create the Source File</h4>
+          <p>Create a file named <code>hello.c</code> in the <code>apps/</code> directory. Use the SQ-OS header file to access system APIs:</p>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">C (apps/hello.c)</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre><span class="c-pre">#include</span> <span class="c-str">&lt;sqos.h&gt;</span>
+
+<span class="c-kw">int</span> <span class="c-fn">main</span>() {
+    <span class="c-fn">sq_print</span>(<span class="c-str">"Hello, SQ-OS Developer!"</span>);
+    <span class="c-fn">sq_sleep</span>(<span class="c-num">1000</span>); <span class="c-cmt">; Sleep for 1000ms (1 second)</span>
+    <span class="c-fn">sq_print</span>(<span class="c-str">"Clean exit via syscall..."</span>);
+    <span class="c-fn">sq_exit</span>(<span class="c-num">0</span>);     <span class="c-cmt">; Exits and cleans up memory</span>
+    <span class="c-kw">return</span> <span class="c-num">0</span>;
+}</pre>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Compile using the SQ SDK</h4>
+          <p>Open your command line and run the <code>sqbuild.bat</code> script inside the <code>sdk/</code> folder. This script compiles the source, links the startup stubs, and builds the ELF executable.</p>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">WINDOWS BATCH / CMD</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre>.\sdk\sqbuild.bat apps\hello.c hello.elf</pre>
+          </div>
+          <p>Output: <strong style="color:var(--green2)">[SQ SDK] Successfully built hello.elf!</strong></p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>Embed into the App Store</h4>
+          <p>Add <code>"hello.elf"</code> to the <code>apps</code> list in <code>assets/embed_apps.py</code> and run the build pipeline (<code>build.bat</code>) to rebuild the floppy disk image with the new binary.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h4>Run on the OS</h4>
+          <p>Boot SQ-OS in QEMU, launch the Terminal app, and type:</p>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">SQ-OS TERMINAL</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre><span class="c-str">SQ&gt;</span> run HELLO.ELF</pre>
+          </div>
+          <p>The program will execute in user mode, print its strings, sleep, and terminate cleanly!</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SDK GUIDE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="sdk-guide">
+    <div class="section-header">
+      <div class="section-label">SDK Documentation</div>
+      <div class="section-title">SDK Guide</div>
+      <div class="section-sub">Public C interface exposed to Ring 3 user applications</div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px;">
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th style="width:260px">Function Prototype</th>
+            <th>Description &amp; Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="cmd-name">void sq_print(const char *str)</div></td>
+            <td>
+              <div class="cmd-desc">Outputs a null-terminated string to the GUI terminal history log. Deferenced safely by kernel.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">void *sq_malloc(size_t size)</div></td>
+            <td>
+              <div class="cmd-desc">Allocates 8-byte aligned memory from the user-space heap. Maps physical heap pages dynamically.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">void sq_free(void *ptr)</div></td>
+            <td>
+              <div class="cmd-desc">No-op in v1. Since each process memory space is isolated, all allocated heap blocks are cleaned up automatically upon exit.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">uint32_t sq_time(int *h, int *m)</div></td>
+            <td>
+              <div class="cmd-desc">Reads current CMOS Real-Time Clock hours and minutes. Returns <code>(hours &lt;&lt; 8) | minutes</code>.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">void sq_sleep(uint32_t ms)</div></td>
+            <td>
+              <div class="cmd-desc">Yields CPU control. Marks process state as sleeping for the equivalent number of 55ms timer ticks.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">void sq_exit(int code)</div></td>
+            <td>
+              <div class="cmd-desc">Terminates the process, triggers cleanup of all page table structures, and schedules the next runnable process.</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       DEVELOPER GUIDE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="dev-guide">
+    <div class="section-header">
+      <div class="section-label">Kernel Architecture</div>
+      <div class="section-title">Developer &amp; Loader Guide</div>
+      <div class="section-sub">How user-space binaries are managed, isolated, and executed</div>
+    </div>
+
+    <div class="cards cards-2">
+      <div class="card purple">
+        <div class="card-icon">🧠</div>
+        <div class="card-title">Process Virtual Memory Isolation</div>
+        <div class="card-desc">
+          When loading an ELF binary, the kernel allocates a separate 4KB page directory. 
+          The first 4MB (Kernel region, 0x00000000 - 0x003FFFFF) is shared to allow interrupts and syscalls. 
+          The second 4MB (User region, 0x00400000 - 0x007FFFFF) is mapped to physical pages allocated from the heap.
+          On context switch, loading the page directory address into <code>CR3</code> dynamically switches user space mappings, preventing any process from corrupting another.
+        </div>
+      </div>
+      <div class="card purple">
+        <div class="card-icon">🏗️</div>
+        <div class="card-title">ELF Segment Loading</div>
+        <div class="card-desc">
+          The ELF parser reads the <code>Elf32_Ehdr</code> and loops through the Program Headers (<code>Elf32_Phdr</code>). 
+          For every segment marked as <code>PT_LOAD</code> (typically <code>.text</code>, <code>.data</code>, and <code>.rodata</code>):
+          <br/><br/>
+          1. Dynamic page table entries are allocated and mapped.<br/>
+          2. Segment contents are copied to their target virtual load addresses (e.g., <code>0x00500000</code>).<br/>
+          3. Uninitialized data (<code>.bss</code>) is zero-initialized.<br/>
+          4. A user stack is mapped at <code>0x007FF000</code> (extending up to <code>0x00800000</code>).
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       PACKAGE MANAGER & ECOSYSTEM
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="package-manager">
+    <div class="section-header">
+      <div class="section-label">Ecosystem &amp; Distribution</div>
+      <div class="section-title">SQ Package Manager (sqpkg)</div>
+      <div class="section-sub">Distribute, install, and execute applications dynamically in SQ-OS</div>
+    </div>
+
+    <p style="color:var(--text2);margin-bottom:20px;">
+      The <code>sqpkg</code> system introduces package management and application distribution to SQ-OS. Users can query a remote HTTP repository, download packaged applications, verify them, install them to the FAT12 disk, create desktop shortcuts, and execute them in Ring 3.
+    </p>
+
+    <div class="cards cards-2" style="margin-bottom:24px;">
+      <div class="card purple">
+        <div class="card-icon">📁</div>
+        <div class="card-title">SQPKG Archive Format (SQF\0)</div>
+        <div class="card-desc">
+          Packages are archived using our custom, extremely lightweight sequential binary format:
+          <br/><br/>
+          <code style="color:var(--cyan)">[Magic: 'SQF\0' (4B)]</code> - File block signature.<br/>
+          <code style="color:var(--cyan)">[Size: uint32_t (4B)]</code> - Little-endian size of file data.<br/>
+          <code style="color:var(--cyan)">[Name: char[32] (32B)]</code> - Null-padded uppercase filename.<br/>
+          <code style="color:var(--cyan)">[Data: size bytes]</code> - Raw binary payload.<br/>
+          <br/>
+          This layout allows the kernel to unpack multiple files (ELF, BMP, JSON) sequentially without complex decompression libraries.
+        </div>
+      </div>
+      <div class="card purple">
+        <div class="card-icon">☁️</div>
+        <div class="card-title">Repository System</div>
+        <div class="card-desc">
+          The SQ Repository resides at <code style="color:var(--green2)">http://repo.sqos.dev/</code> (mapped by the DNS resolver to the host machine gateway <code>10.0.2.2</code>). It contains:
+          <br/><br/>
+          1. <code>packages.txt</code>: Plain-text database of packages in the format <code>[name] [file_name] [description]</code>.<br/>
+          2. <code>packages/*.sqpkg</code>: Packed archives containing the executables.
+        </div>
+      </div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px;">
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th style="width:240px">Command</th>
+            <th>Description &amp; Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="cmd-name">sqpkg update</div></td>
+            <td>
+              <div class="cmd-desc">Downloads <code>packages.txt</code> from the repository and writes it to <code>PACKAGES.TXT</code> on the FAT12 disk.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">sqpkg search &lt;query&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Performs a case-insensitive search across the locally cached database and prints matches.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">sqpkg install &lt;package&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Downloads the package archive from the remote server, validates headers, unpacks files to the FAT12 root directory, and registers desktop icons.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">sqpkg remove &lt;package&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Locates the installed package executable and marks it deleted (0xE5) in the FAT12 root directory.</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">sqpkg list</div></td>
+            <td>
+              <div class="cmd-desc">Scans the root directory sector of the FAT12 volume and displays all installed package binaries (<code>*.ELF</code>).</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       REGRESSION CHECKLIST
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="regression">
+    <div class="section-header">
+      <div class="section-label">Quality Assurance</div>
+      <div class="section-title">Regression Checklist</div>
+      <div class="section-sub">At this scale, preventing bugs is crucial. Verify these check-points on every clean build.</div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;">
+      <h3 style="color:#fff;font-size:16px;margin-bottom:12px;">✅ Milestone Regression Checklist</h3>
+      <ul style="list-style-type:none;padding-left:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] QEMU Boot:</strong> System successfully loads bootloader, enters Protected Mode, and boots to the GUI desktop shell.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] GUI Shell:</strong> Taskbar is visible, the clock ticks in HH:MM:SS, and start menu buttons click smoothly.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] PS/2 Mouse:</strong> Mouse cursor moves smoothly across the screen, window dragging works, and focus highlights shift.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] Scheduler Preemption:</strong> Multiple apps (e.g., Snake and Terminal) can run simultaneously in windowed mode.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] ELF Application Loading:</strong> Running <code>run HELLO.ELF</code> executes Ring 3 instructions and exits cleanly.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] Memory Cleanups:</strong> Heap stats (<code>mem</code>) confirm that terminated process stacks, directories, and segments are freed.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] Ring 3 Isolation:</strong> Running <code>run CRASH.APP</code> segment faults and closes safely without triggering a kernel panic.</li>
+        <li style="color:var(--text2);font-size:13.5px;"><strong style="color:var(--green2)">[ ] TCP/IP Stack:</strong> Running <code>ping 10.0.2.2</code> responds successfully, and browser fetches HTTP responses.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       TERMINAL COMMANDS
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="commands">
+    <div class="section-header">
+      <div class="section-label">Usage</div>
+      <div class="section-title">Terminal Commands</div>
+      <div class="section-sub">Open the Terminal app from the desktop. All commands are case-insensitive.</div>
+    </div>
+
+    <div class="code-block" style="margin-bottom:24px">
+      <div class="code-header">
+        <span class="code-lang">TERMINAL PROMPT</span>
+        <div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div>
+      </div>
+      <pre><span class="c-str">SQ&gt;</span> <span class="c-fn">help</span>                 <span class="c-cmt">← type here</span></pre>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th style="width:180px">Command</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="cmd-name">help</div></td>
+            <td><div class="cmd-desc">Show all available commands</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">proc</div></td>
+            <td>
+              <div class="cmd-desc">List all running processes with PID, name, state, priority, and ring level</div>
+              <div class="cmd-ex">Output: PID NAME STATE PRIO RING<br/>0 system RUN HIGH R0<br/>1 CRASH READY NORM R3</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">run &lt;APP&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Load and execute an app from the FAT12 disk (sector 120+)</div>
+              <div class="cmd-ex">run HELLO.APP &nbsp;&nbsp; run CRASH.APP</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">ping &lt;IP&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Send an ICMP echo request. Times out after 2 seconds if no reply.</div>
+              <div class="cmd-ex">ping 10.0.2.2</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">http &lt;IP&gt;</div></td>
+            <td>
+              <div class="cmd-desc">Send an HTTP GET / to the specified IP via TCP socket. Prints first 512 bytes of response.</div>
+              <div class="cmd-ex">http 93.184.216.34</div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">mem</div></td>
+            <td><div class="cmd-desc">Show heap usage: bytes allocated, free blocks, and heap start address (0x200000)</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">uptime</div></td>
+            <td><div class="cmd-desc">Display system uptime in HH:MM:SS format, derived from PIT tick counter</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">screenshot</div></td>
+            <td><div class="cmd-desc">Save the current VGA framebuffer to disk (if supported)</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">clear</div></td>
+            <td><div class="cmd-desc">Clear the terminal history output area</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">about</div></td>
+            <td><div class="cmd-desc">Display OS name, version, and author</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">version</div></td>
+            <td><div class="cmd-desc">Print kernel version string: SQ-OS v3.0</div></td>
+          </tr>
+          <tr>
+            <td><div class="cmd-name">reboot</div></td>
+            <td><div class="cmd-desc">Trigger system reboot via 8042 keyboard controller pulse on pin A20</div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       APPLICATIONS
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="apps">
+    <div class="section-header">
+      <div class="section-label">Applications</div>
+      <div class="section-title">Built-in Apps</div>
+      <div class="section-sub">Open from the desktop start menu or launch via terminal</div>
+    </div>
+
+    <div class="cards">
+      <div class="card green">
+        <div class="card-icon">⌨️</div>
+        <div class="card-title">Terminal</div>
+        <div class="card-sub">kernel/terminal_app.c · Ring 0</div>
+        <div class="card-desc">Full-featured shell. Supports all commands above. History scrolling, keyboard input, background process launching.</div>
+        <div class="tags"><span class="tag blue">R0</span><span class="tag green">Shell</span></div>
+      </div>
+      <div class="card cyan">
+        <div class="card-icon">🌐</div>
+        <div class="card-title">Browser</div>
+        <div class="card-sub">kernel/browser_app.c · Ring 0</div>
+        <div class="card-desc">Text-mode HTTP browser. Enter a URL or IP, sends TCP GET request, renders response text. Uses the full TCP/IP stack.</div>
+        <div class="tags"><span class="tag blue">R0</span><span class="tag cyan">HTTP</span><span class="tag cyan">TCP</span></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📝</div>
+        <div class="card-title">Notes</div>
+        <div class="card-sub">apps/notes.c · Ring 0</div>
+        <div class="card-desc">Simple windowed text editor. Type, edit, and save text notes. Full keyboard input support within the window.</div>
+        <div class="tags"><span class="tag blue">R0</span><span class="tag green">Editor</span></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🐍</div>
+        <div class="card-title">Snake</div>
+        <div class="card-sub">apps/snake.c · Ring 0 · PRIO_NORMAL</div>
+        <div class="card-desc">Classic Snake game rendered in VGA pixels. Runs as a preemptive process at PRIO_NORMAL, scheduled alongside other tasks.</div>
+        <div class="tags"><span class="tag blue">R0</span><span class="tag yellow">PRIO_NORMAL</span><span class="tag green">Game</span></div>
+      </div>
+      <div class="card orange">
+        <div class="card-icon">👋</div>
+        <div class="card-title">Hello.app</div>
+        <div class="card-sub">apps/hello.asm · Ring 0 · Disk-loaded</div>
+        <div class="card-desc">Flat PIC binary stored at disk sector 121. Loaded by the FAT12 loader, runs via <code>run HELLO.APP</code>. Demonstrates async process loading.</div>
+        <div class="tags"><span class="tag blue">R0</span><span class="tag orange">ASM</span><span class="tag orange">INT 0x80</span></div>
+      </div>
+      <div class="card red">
+        <div class="card-icon">💥</div>
+        <div class="card-title">Crash.app</div>
+        <div class="card-sub">apps/crash.asm · <strong>Ring 3</strong> · Disk-loaded</div>
+        <div class="card-desc">Ring 3 crash test. Writes to unmapped address 0xC0000000 → triggers #PF → kernel prints crash message → kernel survives! Run: <code>run CRASH.APP</code></div>
+        <div class="tags"><span class="tag red">R3</span><span class="tag red">#PF Test</span><span class="tag green">Safe Crash</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RING 3 TEST
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="ring3-test">
+    <div class="section-header">
+      <div class="section-label">Testing</div>
+      <div class="section-title">Ring 3 User Mode Test</div>
+      <div class="section-sub">Verify that the kernel survives a user-mode crash</div>
+    </div>
+
+    <div class="alert warn">
+      <div class="alert-icon">⚠️</div>
+      <p><strong>Make sure QEMU is running</strong> with the latest build before testing Ring 3.</p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Open Terminal app</h4>
+          <p>Click the SQ start button → Terminal, or find it on the desktop.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Check current processes</h4>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">SQ-OS TERMINAL</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre><span class="c-str">SQ&gt;</span> proc
+PID NAME     STATE PRIO RING
+0   system   RUN   HIGH R0</pre>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>Launch the crash test app</h4>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">SQ-OS TERMINAL</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre><span class="c-str">SQ&gt;</span> run CRASH.APP</pre>
+          </div>
+          <p>The loader creates a Ring 3 process with a separate user stack and kernel stack.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h4>Expected output in terminal</h4>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">TERMINAL OUTPUT</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre>Launched background: CRASH
+CRASH: CRASH Segfault
+Addr:0xC0000000</pre>
+          </div>
+          <p>The desktop keeps running, mouse works, Snake keeps playing — <strong style="color:var(--green2)">kernel survived the crash!</strong> ✅</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+          <h4>Verify process was cleaned up</h4>
+          <div class="code-block">
+            <div class="code-header"><span class="code-lang">SQ-OS TERMINAL</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+            <pre><span class="c-str">SQ&gt;</span> proc
+PID NAME     STATE PRIO RING
+0   system   RUN   HIGH R0
+<span class="c-cmt">(CRASH process is gone — cleaned up by scheduler)</span></pre>
+          </div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ARCHITECTURE DIAGRAM
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="arch">
+    <div class="section-header">
+      <div class="section-label">Architecture</div>
+      <div class="section-title">System Diagram</div>
+      <div class="section-sub">Full stack from hardware to applications</div>
+    </div>
+
+    <!-- Layer 0 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 0 — Hardware / Emulation (QEMU)</div>
+      <div class="arch-row">
+        <div class="arch-card yellow">
+          <div class="arch-card-icon">🖥️</div>
+          <div class="arch-card-title">QEMU i386</div>
+          <div class="arch-card-file">PIT 8253 · PIC 8259 · VGA · PS/2 · NE2000</div>
+        </div>
+        <div class="arch-card yellow">
+          <div class="arch-card-icon">💾</div>
+          <div class="arch-card-title">os.img (FAT12)</div>
+          <div class="arch-card-file">1.44MB floppy · sector 0: MBR · sector 120: Apps</div>
+        </div>
+        <div class="arch-card yellow">
+          <div class="arch-card-icon">🌐</div>
+          <div class="arch-card-title">NE2000 NIC</div>
+          <div class="arch-card-file">drivers/ne2000.c · ISA port-mapped I/O</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 1 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 1 — Bootloader (Real Mode → Protected Mode)</div>
+      <div class="arch-row">
+        <div class="arch-card blue">
+          <div class="arch-card-icon">🚀</div>
+          <div class="arch-card-title">boot.asm (16-bit)</div>
+          <div class="arch-card-file">INT 13h LBA load · GDT · CR0 PE bit · far jump</div>
+        </div>
+        <div class="arch-card blue">
+          <div class="arch-card-icon">⚙️</div>
+          <div class="arch-card-title">entry.asm (32-bit)</div>
+          <div class="arch-card-file">IDT 256 gates · timer_isr · page_fault_isr · gdt_flush · tss_flush</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 2 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 2 — Kernel Core</div>
+      <div class="arch-row">
+        <div class="arch-card blue">
+          <div class="arch-card-icon">🧠</div>
+          <div class="arch-card-title">kernel_main()</div>
+          <div class="arch-card-file">kernel/kernel.c · PIC · PIT 100Hz · render loop</div>
+        </div>
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">🧱</div>
+          <div class="arch-card-title">Memory Manager</div>
+          <div class="arch-card-file">kernel/memory.c · kmalloc/kfree · heap @ 0x200000</div>
+        </div>
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">📄</div>
+          <div class="arch-card-title">Paging</div>
+          <div class="arch-card-file">kernel/paging.c · 4MB pages · identity map · CR3</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 2.5 — Ring 3 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 2.5 — Ring 3 User Mode Infrastructure 🆕</div>
+      <div class="arch-row">
+        <div class="arch-card purple">
+          <div class="arch-card-icon">🗂️</div>
+          <div class="arch-card-title">GDT (6 entries)</div>
+          <div class="arch-card-file">kernel/gdt.c · 0x08 KCode · 0x1B UCode · 0x28 TSS</div>
+        </div>
+        <div class="arch-card purple">
+          <div class="arch-card-icon">🎯</div>
+          <div class="arch-card-title">TSS</div>
+          <div class="arch-card-file">kernel/tss.c · ss0=0x10 · esp0=kernel stack top</div>
+        </div>
+        <div class="arch-card red">
+          <div class="arch-card-icon">💥</div>
+          <div class="arch-card-title">Page Fault Handler</div>
+          <div class="arch-card-file">INT 14 · Ring 3 kill · Kernel survive · reschedule</div>
+        </div>
+        <div class="arch-card orange">
+          <div class="arch-card-icon">🧪</div>
+          <div class="arch-card-title">CRASH.APP</div>
+          <div class="arch-card-file">apps/crash.asm · Ring 3 · 0xC0000000 #PF test</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 3 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 3 — Process Subsystem</div>
+      <div class="arch-row">
+        <div class="arch-card blue" style="flex:2">
+          <div class="arch-card-icon">⚡</div>
+          <div class="arch-card-title">Preemptive Scheduler — scheduler_switch()</div>
+          <div class="arch-card-file">kernel/process.c · Priority: HIGH→NORMAL→LOW→IDLE · Round-Robin · Sleep Queue · Window Auto-Close · TSS esp0 update</div>
+        </div>
+        <div class="arch-card purple">
+          <div class="arch-card-icon">💤</div>
+          <div class="arch-card-title">Sleep Queue</div>
+          <div class="arch-card-file">sys_sleep · sleep_ticks decrement · SYS_SLEEP (6)</div>
+        </div>
+        <div class="arch-card green">
+          <div class="arch-card-icon">🪟</div>
+          <div class="arch-card-title">Window Auto-Close</div>
+          <div class="arch-card-file">window.pid link · visible=0 on process exit</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 4 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 4 — Syscall Interface & App Loader</div>
+      <div class="arch-row">
+        <div class="arch-card purple">
+          <div class="arch-card-icon">🔌</div>
+          <div class="arch-card-title">Syscall (INT 0x80)</div>
+          <div class="arch-card-file">kernel/syscall.c · DPL=3 gate · 6 syscalls</div>
+        </div>
+        <div class="arch-card orange">
+          <div class="arch-card-icon">📦</div>
+          <div class="arch-card-title">App Loader</div>
+          <div class="arch-card-file">kernel/loader.c · FAT12 · async process create · window link</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 5 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 5 — GUI Subsystem</div>
+      <div class="arch-row">
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">🖼️</div>
+          <div class="arch-card-title">Graphics Engine</div>
+          <div class="arch-card-file">kernel/graphics.c · Mode 13h · 320×200 · SAFE_WRITE</div>
+        </div>
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">🗃️</div>
+          <div class="arch-card-title">Window Manager</div>
+          <div class="arch-card-file">kernel/window_manager.c · Z-order · drag · pid field</div>
+        </div>
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">🖥️</div>
+          <div class="arch-card-title">Desktop Shell</div>
+          <div class="arch-card-file">kernel/desktop.c · taskbar · start menu · clock</div>
+        </div>
+        <div class="arch-card cyan">
+          <div class="arch-card-icon">🐭</div>
+          <div class="arch-card-title">Mouse Driver</div>
+          <div class="arch-card-file">drivers/mouse.c · PS/2 · IRQ12 · packet parse</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 6 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 6 — Applications</div>
+      <div class="arch-row">
+        <div class="arch-card green"><div class="arch-card-icon">⌨️</div><div class="arch-card-title">Terminal</div><div class="arch-card-file">kernel/terminal_app.c · Ring 0</div></div>
+        <div class="arch-card green"><div class="arch-card-icon">🌐</div><div class="arch-card-title">Browser</div><div class="arch-card-file">kernel/browser_app.c · Ring 0</div></div>
+        <div class="arch-card green"><div class="arch-card-icon">📝</div><div class="arch-card-title">Notes</div><div class="arch-card-file">apps/notes.c · Ring 0</div></div>
+        <div class="arch-card green"><div class="arch-card-icon">🐍</div><div class="arch-card-title">Snake</div><div class="arch-card-file">apps/snake.c · Ring 0</div></div>
+        <div class="arch-card orange"><div class="arch-card-icon">👋</div><div class="arch-card-title">Hello.app</div><div class="arch-card-file">apps/hello.asm · Ring 0 · sector 121</div></div>
+        <div class="arch-card red"><div class="arch-card-icon">💥</div><div class="arch-card-title">Crash.app</div><div class="arch-card-file">apps/crash.asm · <strong>Ring 3</strong> · sector 122</div></div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 7 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 7 — Network Stack (TCP/IP)</div>
+      <div class="arch-row">
+        <div class="arch-card red"><div class="arch-card-icon">🔗</div><div class="arch-card-title">Ethernet</div><div class="arch-card-file">net/ethernet.c · NE2000 Tx/Rx</div></div>
+        <div class="arch-card red"><div class="arch-card-icon">📡</div><div class="arch-card-title">ARP</div><div class="arch-card-file">net/arp.c · IP→MAC · retry</div></div>
+        <div class="arch-card red"><div class="arch-card-icon">🌍</div><div class="arch-card-title">IP / ICMP</div><div class="arch-card-file">net/ip.c · icmp.c · ping 2s timeout</div></div>
+        <div class="arch-card red"><div class="arch-card-icon">🔄</div><div class="arch-card-title">TCP</div><div class="arch-card-file">net/tcp.c · handshake · HTTP GET</div></div>
+      </div>
+    </div>
+    <div class="arch-connector"><div class="arch-connector-dot">↓</div></div>
+
+    <!-- Layer 8 -->
+    <div class="arch-section">
+      <div class="arch-label">Layer 8 — Storage & Drivers</div>
+      <div class="arch-row">
+        <div class="arch-card yellow"><div class="arch-card-icon">📂</div><div class="arch-card-title">FAT12 Driver</div><div class="arch-card-file">fs/fat12.c · sector 120+ · app store</div></div>
+        <div class="arch-card yellow"><div class="arch-card-icon">🕒</div><div class="arch-card-title">RTC</div><div class="arch-card-file">kernel/rtc.c · CMOS · BCD decode</div></div>
+        <div class="arch-card yellow"><div class="arch-card-icon">🔌</div><div class="arch-card-title">PCI Bus</div><div class="arch-card-file">drivers/pci.c · config space scan</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RING 3 DEEP DIVE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="ring3">
+    <div class="section-header">
+      <div class="section-label">Architecture Deep Dive</div>
+      <div class="section-title">Ring 3 User Mode</div>
+      <div class="section-sub">How x86 privilege separation works in SQ-OS</div>
+    </div>
+
+    <div class="cards cards-2" style="margin-bottom:32px">
+      <div class="card purple">
+        <div class="card-icon">🔒</div>
+        <div class="card-title">How Ring 3 Entry Works</div>
+        <div class="card-desc">
+          When a Ring 3 process is first scheduled, the kernel stack contains a fake iret frame with CS=0x1B (DPL=3).
+          timer_isr does <code>popad</code> then <code>iret</code>. The CPU sees the CPL change (0→3),
+          pops SS and ESP from the iret frame, switches to the user stack, and jumps to the entry point in Ring 3. No special jump instruction needed — just iret!
+        </div>
+        <div class="code-block" style="margin-top:12px">
+          <div class="code-header"><span class="code-lang">KERNEL STACK LAYOUT (Ring 3 process, first run)</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+          <pre><span class="c-cmt">; p-&gt;esp points here (lowest address)</span>
+[EAX=0] [ECX=0] [EDX=0] [EBX=0]  <span class="c-cmt">← pushad</span>
+[ESP=0] [EBP=0] [ESI=0] [EDI=0]
+<span class="c-str">EIP</span>   = entry_point   <span class="c-cmt">← iret pops first</span>
+<span class="c-str">CS</span>    = 0x1B          <span class="c-cmt">← Ring 3 code (DPL=3)</span>
+<span class="c-str">EFLAGS</span>= 0x0202        <span class="c-cmt">← IF=1 (interrupts on)</span>
+<span class="c-str">ESP3</span>  = user_stack_top <span class="c-cmt">← CPU switches stack</span>
+<span class="c-str">SS</span>    = 0x23           <span class="c-cmt">← Ring 3 data (DPL=3)</span></pre>
+        </div>
+      </div>
+      <div class="card red">
+        <div class="card-icon">💥</div>
+        <div class="card-title">How Page Fault Crash Works</div>
+        <div class="card-desc">
+          When Ring 3 code accesses an invalid address, the CPU raises #PF (INT 14).
+          It reads TSS.esp0 (updated per context switch), switches to the kernel stack, and calls page_fault_isr.
+          The handler checks error_code bit 2 (user mode fault), terminates the process, and forces a reschedule.
+          The kernel never crashes.
+        </div>
+        <div class="code-block" style="margin-top:12px">
+          <div class="code-header"><span class="code-lang">FAULT FLOW</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+          <pre>Ring 3 app: <span class="c-str">mov [0xC0000000], eax</span>  <span class="c-cmt">← #PF</span>
+CPU: reads TSS.esp0 → switches to kernel stack
+CPU: pushes SS3, ESP3, EFLAGS, CS, EIP, ErrorCode
+<span class="c-fn">page_fault_isr</span>:
+  → <span class="c-fn">page_fault_handler</span>(error_code, cr2)
+    → terminates process, prints crash msg
+    → returns 0 (ring 3, handled)
+  → <span class="c-fn">scheduler_switch</span>(current_esp)
+    → picks next READY process
+  → <span class="c-fn">update_tss_esp0</span>()
+  → mov esp, new_esp
+  → popad + iret → <span class="c-str">kernel survives!</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-sub" style="margin-bottom:16px"><strong style="color:#fff">GDT Selectors</strong></div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px">
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Index</th><th>Selector</th><th>Type</th><th>DPL</th><th>Used for</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="cmd-name">0</span></td><td><span class="cmd-name">0x00</span></td><td style="color:var(--text2)">Null</td><td>—</td><td style="color:var(--text2)">Required by x86 spec</td></tr>
+          <tr><td><span class="cmd-name">1</span></td><td><span class="cmd-name">0x08</span></td><td style="color:var(--blue2)">Code</td><td>0</td><td style="color:var(--text2)">Kernel code (CS in Ring 0)</td></tr>
+          <tr><td><span class="cmd-name">2</span></td><td><span class="cmd-name">0x10</span></td><td style="color:var(--blue2)">Data</td><td>0</td><td style="color:var(--text2)">Kernel data (DS/SS in Ring 0, TSS.ss0)</td></tr>
+          <tr><td><span class="cmd-name">3</span></td><td><span class="cmd-name">0x1B</span></td><td style="color:var(--purple2)">Code</td><td>3</td><td style="color:var(--text2)">User code (CS in Ring 3 iret frame)</td></tr>
+          <tr><td><span class="cmd-name">4</span></td><td><span class="cmd-name">0x23</span></td><td style="color:var(--purple2)">Data</td><td>3</td><td style="color:var(--text2)">User data (SS in Ring 3 iret frame)</td></tr>
+          <tr><td><span class="cmd-name">5</span></td><td><span class="cmd-name">0x28</span></td><td style="color:var(--cyan)">TSS</td><td>0</td><td style="color:var(--text2)">Task State Segment (ltr 0x28)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SCHEDULER
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="scheduler">
+    <div class="section-header">
+      <div class="section-label">Architecture Deep Dive</div>
+      <div class="section-title">Preemptive Scheduler</div>
+      <div class="section-sub">Priority-based Round-Robin with sleep queue</div>
+    </div>
+
+    <div class="section-sub" style="margin-bottom:12px"><strong style="color:#fff">Process State Machine</strong></div>
+    <div class="flow-row">
+      <div class="flow-box">UNUSED</div>
+      <div class="flow-arrow">→ create →</div>
+      <div class="flow-box ready">READY</div>
+      <div class="flow-arrow">→ timer →</div>
+      <div class="flow-box run">RUNNING</div>
+      <div class="flow-arrow">→ tick →</div>
+      <div class="flow-box ready">READY</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-box run">RUNNING</div>
+      <div class="flow-arrow">→ sys_sleep() →</div>
+      <div class="flow-box sleep">SLEEPING</div>
+      <div class="flow-arrow">→ ticks=0 →</div>
+      <div class="flow-box ready">READY</div>
+      <div class="flow-arrow">→ scheduled →</div>
+      <div class="flow-box run">RUNNING</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-box run">RUNNING</div>
+      <div class="flow-arrow">→ process_exit() →</div>
+      <div class="flow-box term">TERMINATED</div>
+      <div class="flow-arrow">→ cleanup →</div>
+      <div class="flow-box">UNUSED</div>
+    </div>
+
+    <div style="margin-top:28px" class="section-sub"><strong style="color:#fff">Priority Levels</strong></div>
+    <div class="cards" style="margin-top:14px">
+      <div class="card red">
+        <div class="card-title">PRIO_HIGH (3)</div>
+        <div class="card-desc">Reserved for the <strong>system/GUI</strong> process. Runs first — ensures the desktop never lags even when user apps are busy.</div>
+        <div class="tags"><span class="tag red">PID 0: system</span></div>
+      </div>
+      <div class="card blue">
+        <div class="card-title">PRIO_NORMAL (2)</div>
+        <div class="card-desc">Default for all user apps loaded from disk or built into the kernel. Snake, Notes, Browser, CRASH.APP all run here.</div>
+        <div class="tags"><span class="tag blue">All user apps</span></div>
+      </div>
+      <div class="card yellow">
+        <div class="card-title">PRIO_LOW (1)</div>
+        <div class="card-desc">Available for background tasks that should yield to normal processes. Not currently assigned automatically.</div>
+        <div class="tags"><span class="tag yellow">Background tasks</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">PRIO_IDLE (0)</div>
+        <div class="card-desc">Only runs when nothing else is ready. Reserved for future idle task implementation.</div>
+        <div class="tags"><span class="tag">Future idle task</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       MEMORY LAYOUT
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="memory">
+    <div class="section-header">
+      <div class="section-label">Architecture</div>
+      <div class="section-title">Memory Layout</div>
+      <div class="section-sub">Physical address space map (identity-paged)</div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">PHYSICAL MEMORY MAP (32MB)</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+      <pre><span class="c-str">0x00000000</span>  –  <span class="c-str">0x000003FF</span>   IVT (real mode, unused in PM)
+<span class="c-str">0x00000400</span>  –  <span class="c-str">0x000004FF</span>   BIOS Data Area
+<span class="c-str">0x00001000</span>  –  <span class="c-str">0x00001FFF</span>   Page Directory (paging.c)
+<span class="c-str">0x00002000</span>  –  <span class="c-str">0x000027FF</span>   IDT (256 × 8 byte gates)
+<span class="c-str">0x00007C00</span>  –  <span class="c-str">0x00007DFF</span>   Boot sector (MBR, 512 bytes)
+<span class="c-str">0x00007E00</span>  –  <span class="c-str">0x0001FFFF</span>   Kernel binary (entry.asm → kernel.bin)
+<span class="c-str">0x00090000</span>  –  <span class="c-str">0x00090FFF</span>   System task kernel stack (fixed)
+<span class="c-str">0x000A0000</span>  –  <span class="c-str">0x000AFFFF</span>   VGA framebuffer (Mode 13h, 320×200)
+<span class="c-str">0x000B8000</span>  –  <span class="c-str">0x000BFFFF</span>   VGA text mode buffer (80×25 cells)
+<span class="c-str">0x00200000</span>  –  <span class="c-str">0x01FFFFFF</span>   <span class="c-fn">Kernel heap</span> (kmalloc pool, ~30MB)
+  ├── Per-process <span class="c-fn">kernel stacks</span>   (4KB each, dynamically allocated)
+  ├── Per-process <span class="c-fn">user stacks</span>     (4KB each, Ring 3 only)
+  └── App code buffers               (loaded from FAT12 disk)
+
+<span class="c-str">0xC0000000</span>  –  <span class="c-str">0xFFFFFFFF</span>   <span class="c-cmt">UNMAPPED — triggers #PF (crash.app test)</span></pre>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       NETWORK STACK
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="network">
+    <div class="section-header">
+      <div class="section-label">Architecture</div>
+      <div class="section-title">Network Stack</div>
+      <div class="section-sub">TCP/IP implementation over NE2000 NIC</div>
+    </div>
+
+    <div class="flow-row">
+      <div class="flow-box">App (ping/http)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box ready">net/icmp.c</div>
+      <div class="flow-arrow">or</div>
+      <div class="flow-box ready">net/tcp.c</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box normal">net/ip.c</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box sleep">net/arp.c</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">net/ethernet.c</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">drivers/ne2000.c</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">NIC Hardware</div>
+    </div>
+
+    <div class="alert tip" style="margin-top:20px">
+      <div class="alert-icon">💡</div>
+      <p><strong>QEMU Network:</strong> Use <code>-net nic,model=ne2k_pci -net user</code> flags. The default gateway is <code>10.0.2.2</code>. Try <code>ping 10.0.2.2</code> in the terminal to test connectivity.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       FILE STRUCTURE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="files">
+    <div class="section-header">
+      <div class="section-label">Development</div>
+      <div class="section-title">File Structure</div>
+      <div class="section-sub">Every source file and its purpose</div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">PROJECT TREE</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+      <pre>SQ-OS/
+├── <span class="c-fn">boot/</span>
+│   └── boot.asm          <span class="c-cmt">16-bit bootloader, INT 13h LBA, GDT, PM switch</span>
+│
+├── <span class="c-fn">kernel/</span>
+│   ├── entry.asm         <span class="c-cmt">IDT, ISRs, timer_isr, page_fault_isr, gdt_flush, tss_flush</span>
+│   ├── kernel.c          <span class="c-cmt">kernel_main(), VGA init, timer handler, PIC setup</span>
+│   ├── graphics.c        <span class="c-cmt">VGA Mode 13h pixel writes, text rendering, double buffer</span>
+│   ├── memory.c          <span class="c-cmt">kmalloc / kfree heap allocator (bump + free-list)</span>
+│   ├── paging.c          <span class="c-cmt">Identity paging, page directory, CR3/CR0 PG setup</span>
+│   ├── <span class="c-str">gdt.c / gdt.h</span>     <span class="c-cmt">🆕 6-entry GDT, Ring 3 descriptors, gdt_flush()</span>
+│   ├── <span class="c-str">tss.c / tss.h</span>     <span class="c-cmt">🆕 TSS structure, tss_init(), tss_set_kernel_stack()</span>
+│   ├── process.c         <span class="c-cmt">Process PCB, scheduler, dual stacks, page_fault_handler</span>
+│   ├── process.h         <span class="c-cmt">Process struct (ring, kernel_stack_top, user_stack_mem)</span>
+│   ├── syscall.c         <span class="c-cmt">INT 0x80 dispatcher, 6 syscall implementations</span>
+│   ├── syscall.h         <span class="c-cmt">SYS_PRINT/EXIT/SLEEP/MALLOC/FREE/TIME defines</span>
+│   ├── loader.c          <span class="c-cmt">FAT12 disk loader, async process creation, window link</span>
+│   ├── window_manager.c  <span class="c-cmt">Window struct (pid field), Z-order, focus, drag</span>
+│   ├── desktop.c         <span class="c-cmt">Taskbar, start menu, system monitor, event dispatch</span>
+│   ├── terminal_app.c    <span class="c-cmt">Shell commands including proc (PID/NAME/STATE/PRIO/RING)</span>
+│   ├── browser_app.c     <span class="c-cmt">HTTP/TCP text browser</span>
+│   ├── wallpaper.c       <span class="c-cmt">Procedural wallpaper renderer</span>
+│   └── rtc.c             <span class="c-cmt">CMOS real-time clock reader</span>
+│
+├── <span class="c-fn">apps/</span>
+│   ├── hello.asm         <span class="c-cmt">Ring 0 demo app (flat PIC binary, sector 121)</span>
+│   ├── crash.asm         <span class="c-cmt">🆕 Ring 3 crash test (sector 122)</span>
+│   ├── notes.c           <span class="c-cmt">Windowed text editor</span>
+│   └── snake.c           <span class="c-cmt">Snake game (PRIO_NORMAL process)</span>
+│
+├── <span class="c-fn">drivers/</span>
+│   ├── mouse.c           <span class="c-cmt">PS/2 mouse IRQ12 driver</span>
+│   ├── ne2000.c          <span class="c-cmt">NE2000 ISA NIC driver (port I/O)</span>
+│   └── pci.c             <span class="c-cmt">PCI config space scanner</span>
+│
+├── <span class="c-fn">net/</span>
+│   ├── net.c / net.h     <span class="c-cmt">Network subsystem init</span>
+│   ├── ethernet.c        <span class="c-cmt">Ethernet frame Tx/Rx</span>
+│   ├── arp.c             <span class="c-cmt">ARP request/reply with retry</span>
+│   ├── ip.c              <span class="c-cmt">IPv4 packet routing</span>
+│   ├── icmp.c            <span class="c-cmt">ICMP echo (ping, 2s timeout)</span>
+│   └── tcp.c             <span class="c-cmt">TCP connection, handshake, HTTP GET</span>
+│
+├── <span class="c-fn">fs/</span>
+│   └── fat12.c           <span class="c-cmt">FAT12 directory + binary reader</span>
+│
+├── <span class="c-fn">include/</span>
+│   └── window_manager.h  <span class="c-cmt">Window struct with pid, title, visible fields</span>
+│
+├── <span class="c-fn">assets/</span>
+│   ├── embed_apps.py     <span class="c-cmt">Writes HELLO.APP + CRASH.APP to disk sector 120+</span>
+│   └── gen_wallpaper.py  <span class="c-cmt">Generates wallpaper_data.h pixel array</span>
+│
+├── <span class="c-fn">docs/architecture/</span>
+│   └── index.html        <span class="c-cmt">← You are here</span>
+│
+├── build.bat             <span class="c-cmt">Full build pipeline (NASM + GCC + LD + Python)</span>
+└── linker.ld             <span class="c-cmt">Linker script: .entry section at 0x7E00</span></pre>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SYSCALL TABLE
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="syscalls">
+    <div class="section-header">
+      <div class="section-label">Development</div>
+      <div class="section-title">Syscall Table</div>
+      <div class="section-sub">All syscalls are invoked via <code>int 0x80</code> with EAX = syscall number</div>
+    </div>
+
+    <div class="code-block" style="margin-bottom:20px">
+      <div class="code-header"><span class="code-lang">CALLING CONVENTION (x86 int 0x80)</span><div class="code-dots"><div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div></div></div>
+      <pre><span class="c-cmt">; EAX = syscall number
+; EBX = arg1, ECX = arg2, EDX = arg3, ESI = arg4, EDI = arg5
+; Return value in EAX after syscall returns</span>
+
+<span class="c-cmt">; Example: SYS_PRINT</span>
+<span class="c-kw">mov</span> eax, <span class="c-num">1</span>            <span class="c-cmt">; SYS_PRINT</span>
+<span class="c-kw">mov</span> ebx, <span class="c-str">message</span>      <span class="c-cmt">; pointer to string</span>
+<span class="c-kw">int</span> <span class="c-num">0x80</span>
+
+<span class="c-cmt">; Example: SYS_EXIT (Ring 3 only — use this, NOT int 0x20)</span>
+<span class="c-kw">mov</span> eax, <span class="c-num">5</span>            <span class="c-cmt">; SYS_EXIT</span>
+<span class="c-kw">xor</span> ebx, ebx          <span class="c-cmt">; exit code 0</span>
+<span class="c-kw">int</span> <span class="c-num">0x80</span></pre>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+      <table class="cmd-table">
+        <thead>
+          <tr><th>EAX</th><th>Name</th><th>Args</th><th>Returns</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-name">0</span></td>
+            <td><span style="color:var(--text)">—</span></td>
+            <td style="color:var(--text3)">—</td>
+            <td style="color:var(--text3)">—</td>
+            <td style="color:var(--text3)">Unused</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">1</span></td>
+            <td><span style="color:var(--green2)">SYS_PRINT</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX = const char*</td>
+            <td style="color:var(--text3)">0</td>
+            <td style="color:var(--text2)">Print string to GUI terminal</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">2</span></td>
+            <td><span style="color:var(--green2)">SYS_MALLOC</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX = size_t</td>
+            <td style="color:var(--text2)">void* ptr</td>
+            <td style="color:var(--text2)">Allocate heap memory (kmalloc)</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">3</span></td>
+            <td><span style="color:var(--green2)">SYS_FREE</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX = void*</td>
+            <td style="color:var(--text3)">0</td>
+            <td style="color:var(--text2)">Free heap allocation (kfree)</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">4</span></td>
+            <td><span style="color:var(--green2)">SYS_TIME</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX=int* h, ECX=int* m</td>
+            <td style="color:var(--text2)">(h&lt;&lt;8)|m</td>
+            <td style="color:var(--text2)">Read RTC time (hours, minutes)</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">5</span></td>
+            <td><span style="color:var(--green2)">SYS_EXIT</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX = int code</td>
+            <td style="color:var(--text3)">—</td>
+            <td style="color:var(--text2)">Terminate current process. <strong>Ring 3 apps must use this!</strong></td>
+          </tr>
+          <tr>
+            <td><span class="cmd-name">6</span></td>
+            <td><span style="color:var(--green2)">SYS_SLEEP</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text2)">EBX = uint32 ticks</td>
+            <td style="color:var(--text3)">0</td>
+            <td style="color:var(--text2)">Sleep for N PIT ticks (~55ms each). State→SLEEPING until ticks expire.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROADMAP
+  ══════════════════════════════════════════════════════════ -->
+  <section class="section" id="roadmap">
+    <div class="section-header">
+      <div class="section-label">Development</div>
+      <div class="section-title">Roadmap</div>
+      <div class="section-sub">What's been built and what comes next</div>
+    </div>
+
+    <div class="timeline">
+      <div class="tl-item done">
+        <div class="tl-title">Bootloader &amp; Protected Mode <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">16→32 bit switch, GDT, IDT, IRQ remapping</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">VGA GUI &amp; Window Manager <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">320×200 Mode 13h, Z-ordered windows, taskbar, start menu, mouse</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">Memory Manager <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">kmalloc/kfree with free-list, heap at 0x200000</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">FAT12 Filesystem &amp; App Loader <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">Disk-based app store, async process loading, window linking</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">TCP/IP Networking <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">Ethernet, ARP, IPv4, ICMP ping, TCP connection, HTTP browser</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">Preemptive Scheduler <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">Priority levels, round-robin, sleep queue, window auto-close on exit</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">Ring 3 User Mode <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">GDT/TSS, dual stacks, iret privilege switch, page fault handler, crash.app</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">ELF Executable Loader <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">Parses ELF headers and loads PT_LOAD segments to custom virtual memory addresses.</div>
+      </div>
+      <div class="tl-item done">
+        <div class="tl-title">SQ SDK <span class="tl-badge done">DONE</span></div>
+        <div class="tl-desc">Lightweight C SDK with int 0x80 syscall wrappers (sq_print, sq_sleep, sq_malloc) and sqbuild.bat toolchain.</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">Virtual Filesystem (VFS) <span class="tl-badge next">PLANNED</span></div>
+        <div class="tl-desc">Unified file API across FAT12, future ext2, RAM disk</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">Demand Paging <span class="tl-badge next">PLANNED</span></div>
+        <div class="tl-desc">Page fault handler extension for lazy memory allocation</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">IPC — Inter-Process Communication <span class="tl-badge next">PLANNED</span></div>
+        <div class="tl-desc">Message queues: send(pid, msg) / receive() syscalls</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">USB Support <span class="tl-badge next">PLANNED</span></div>
+        <div class="tl-desc">UHCI/EHCI, USB keyboard, USB mouse, flash drives</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">ATA / AHCI Disk Driver <span class="tl-badge next">PLANNED</span></div>
+        <div class="tl-desc">Real disk access beyond 1.44MB floppy image</div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-title">SMP — Multi-Core <span class="tl-badge next">FUTURE</span></div>
+        <div class="tl-desc">APIC timer, per-core scheduler queues, SMP boot</div>
+      </div>
+    </div>
+  </section>
+
+</main><!-- /.main -->
+
+<!-- ════════════════════ FOOTER ════════════════════ -->
+<footer>
+  <span>SQ-OS v3.0 · x86 32-bit Protected Mode · Built by <strong>Harsh</strong></span>
+  <span>📄 <a href="../../README.md">README.md</a> &nbsp;·&nbsp; 🔨 build.bat &nbsp;·&nbsp; ⚡ Ring 3 User Mode</span>
+</footer>
+
+<script>
+  /* Active sidebar link on scroll */
+  const sections = document.querySelectorAll('section[id], div[id]');
+  const navLinks  = document.querySelectorAll('.nav-link');
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.25, rootMargin: '-60px 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  /* Scroll animation */
+  const allCards = document.querySelectorAll('.card, .arch-card, .step, .tl-item');
+  const anim = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.style.opacity = '1';
+        e.target.style.transform = 'translateY(0)';
+      }
+    });
+  }, { threshold: 0.05 });
+
+  allCards.forEach(c => {
+    c.style.opacity = '0';
+    c.style.transform = 'translateY(16px)';
+    c.style.transition = 'opacity .35s ease, transform .35s ease';
+    anim.observe(c);
+  });
+</script>
+</body>
+</html>

@@ -462,3 +462,75 @@ int fs_read_file(const char *name, uint8_t *buffer, uint32_t max_bytes) {
     }
     return fat12_read_file(&entry, buffer, max_bytes);
 }
+
+int fs_delete_file(const char *name) {
+    if (fat12_init() != 0) return -1;
+
+    /* Convert target name to space-padded 8.3 FAT format (all uppercase) */
+    char target_name[8] = {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '};
+    char target_ext[3]  = {' ', ' ', ' '};
+
+    int dot_idx = -1;
+    for (int i = 0; name[i]; i++) {
+        if (name[i] == '.') { dot_idx = i; break; }
+    }
+
+    int name_len = (dot_idx != -1) ? dot_idx : 0;
+    if (dot_idx == -1) {
+        int l = 0; while (name[l]) l++;
+        name_len = l;
+    }
+    if (name_len > 8) name_len = 8;
+    for (int i = 0; i < name_len; i++) {
+        char c = name[i];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        target_name[i] = c;
+    }
+    if (dot_idx != -1) {
+        for (int i = 0; i < 3 && name[dot_idx + 1 + i]; i++) {
+            char c = name[dot_idx + 1 + i];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            target_ext[i] = c;
+        }
+    }
+
+    uint32_t root_lba = (uint32_t)g_bpb.reserved_sectors
+                      + ((uint32_t)g_bpb.num_fats * (uint32_t)g_bpb.fat_size_16);
+    uint32_t root_sectors = ((uint32_t)g_bpb.root_entry_count * 32U) / (uint32_t)g_bpb.bytes_per_sector;
+
+    uint8_t sector[512];
+    int entries_per_sector = (int)(g_bpb.bytes_per_sector / 32);
+
+    for (uint32_t s = 0; s < root_sectors; s++) {
+        if (disk_read_sector(root_lba + s, sector) != 0) return -1;
+
+        int modified = 0;
+        for (int e = 0; e < entries_per_sector; e++) {
+            DirEntry *entry = (DirEntry *)(sector + e * 32);
+            if (entry->name[0] == 0x00) break;
+            if (entry->name[0] == 0xE5) continue;
+
+            int match = 1;
+            for (int k = 0; k < 8; k++) {
+                if (entry->name[k] != target_name[k]) { match = 0; break; }
+            }
+            if (match) {
+                for (int k = 0; k < 3; k++) {
+                    if (entry->ext[k] != target_ext[k]) { match = 0; break; }
+                }
+            }
+
+            if (match) {
+                entry->name[0] = 0xE5; /* Mark as deleted */
+                modified = 1;
+            }
+        }
+
+        if (modified) {
+            if (disk_write_sector(root_lba + s, sector) != 0) return -1;
+            return 0; /* Success */
+        }
+    }
+
+    return -1; /* Not found */
+}

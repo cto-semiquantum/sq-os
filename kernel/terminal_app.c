@@ -5,6 +5,14 @@
 #include "paging.h"
 #include "syscall.h"
 #include "process.h"
+#include "../net/net.h"
+#include "../net/arp.h"
+#include "../net/ip.h"
+#include "../net/icmp.h"
+#include "../net/ethernet.h"
+#include "../drivers/ne2000.h"
+#include "../net/tcp.h"
+#include "graphics.h"
 
 /* ============================================================
  * Terminal State
@@ -76,6 +84,20 @@ static int u32_to_dec(uint32_t val, char *out) {
     return n;
 }
 
+static void btox(uint8_t val, char *out) {
+    const char *hex = "0123456789ABCDEF";
+    out[0] = hex[val >> 4];
+    out[1] = hex[val & 0x0F];
+}
+
+static void btoa(uint8_t val, char *out, int *len) {
+    if (val == 0) { out[0]='0'; *len=1; return; }
+    char tmp[4]; int n = 0;
+    while (val > 0) { tmp[n++] = '0' + (val % 10); val /= 10; }
+    for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+    *len = n;
+}
+
 /* ============================================================
  * Output history helpers
  * ============================================================ */
@@ -145,6 +167,198 @@ void terminal_execute_command(const char *cmd) {
         append_history("CLEAR MEM HEAP FILES");
         append_history("APPS  RUN <name> REBOOT");
         append_history("PAGING SYSCALLS PROC");
+        append_history("NET ETHERNET ARP PING");
+        append_history("SCREENSHOT  HTTP <ip> SQPKG");
+
+    } else if (str_eq(cmd, "net")) {
+        if (ne2k_found) {
+            append_history("NIC detected: NE2000");
+            
+            char mline[40];
+            int p = 0;
+            str_copy(mline, "MAC address: ", 40);
+            p = 13;
+            for(int j=0; j<6; j++) {
+                btox(ne2k_mac[j], &mline[p]);
+                p += 2;
+                if(j<5) mline[p++] = ':';
+            }
+            mline[p] = 0;
+            append_history(mline);
+            
+            str_copy(mline, "IP address: ", 40); p=12;
+            for(int j=0; j<4; j++) {
+                int l; btoa(my_ip[j], &mline[p], &l); p += l;
+                if(j<3) mline[p++]='.';
+            }
+            mline[p]=0; append_history(mline);
+            
+            str_copy(mline, "Gateway: ", 40); p=9;
+            for(int j=0; j<4; j++) {
+                int l; btoa(gateway_ip[j], &mline[p], &l); p += l;
+                if(j<3) mline[p++]='.';
+            }
+            mline[p]=0; append_history(mline);
+            
+            char num[12];
+            str_copy(mline, "TX packets: ", 40);
+            p = 12;
+            u32_to_dec(ne2k_tx_packets, num);
+            for(int j=0; num[j]; j++) mline[p++] = num[j];
+            mline[p] = 0;
+            append_history(mline);
+            
+            str_copy(mline, "RX packets: ", 40);
+            p = 12;
+            u32_to_dec(ne2k_rx_packets, num);
+            for(int j=0; num[j]; j++) mline[p++] = num[j];
+            mline[p] = 0;
+            append_history(mline);
+        } else {
+            append_history("NIC detected: NONE");
+        }
+
+    } else if (str_eq(cmd, "ethernet")) {
+        char mline[40];
+        int p = 0;
+        str_copy(mline, "MAC: ", 40);
+        p = 5;
+        for(int j=0; j<6; j++) {
+            btox(ne2k_mac[j], &mline[p]);
+            p += 2;
+            if(j<5) mline[p++] = ':';
+        }
+        mline[p] = 0;
+        append_history(mline);
+        
+        char num[12];
+        str_copy(mline, "Packets TX: ", 40);
+        p = 12;
+        u32_to_dec(ne2k_tx_packets, num);
+        for(int j=0; num[j]; j++) mline[p++] = num[j];
+        mline[p] = 0;
+        append_history(mline);
+        
+        str_copy(mline, "Packets RX: ", 40);
+        p = 12;
+        u32_to_dec(ne2k_rx_packets, num);
+        for(int j=0; num[j]; j++) mline[p++] = num[j];
+        mline[p] = 0;
+        append_history(mline);
+
+    } else if (str_eq(cmd, "ipconfig")) {
+        char mline[40];
+        int p = 0;
+        str_copy(mline, "IP Address: ", 40); p=12;
+        for(int j=0; j<4; j++) {
+            int l; btoa(my_ip[j], &mline[p], &l); p += l;
+            if(j<3) mline[p++]='.';
+        }
+        mline[p]=0; append_history(mline);
+
+        str_copy(mline, "Gateway:    ", 40); p=12;
+        for(int j=0; j<4; j++) {
+            int l; btoa(gateway_ip[j], &mline[p], &l); p += l;
+            if(j<3) mline[p++]='.';
+        }
+        mline[p]=0; append_history(mline);
+
+        str_copy(mline, "Netmask:    ", 40); p=12;
+        for(int j=0; j<4; j++) {
+            int l; btoa(netmask[j], &mline[p], &l); p += l;
+            if(j<3) mline[p++]='.';
+        }
+        mline[p]=0; append_history(mline);
+
+    } else if (str_starts_with(cmd, "arp")) {
+        if (str_eq(cmd, "arp")) {
+            arp_print_cache();
+        } else if (str_starts_with(cmd, "arp ")) {
+            const char *ip_str = cmd + 4;
+            uint8_t target[4] = {0,0,0,0};
+            int ip_part = 0;
+            for(int j=0; ip_str[j] && ip_part < 4; j++) {
+                if(ip_str[j] == '.') ip_part++;
+                else if (ip_str[j] >= '0' && ip_str[j] <= '9') {
+                    target[ip_part] = target[ip_part] * 10 + (ip_str[j] - '0');
+                }
+            }
+            append_history("ARP request sent...");
+            arp_request(target);
+        }
+
+    } else if (str_starts_with(cmd, "ping ")) {
+        const char *ip_str = cmd + 5;
+        uint8_t target[4] = {0,0,0,0};
+        int ip_part = 0;
+        int valid_ip = 1;
+
+        for (int j = 0; ip_str[j]; j++) {
+            if (ip_str[j] != '.' && (ip_str[j] < '0' || ip_str[j] > '9')) {
+                valid_ip = 0;
+                break;
+            }
+        }
+
+        for(int j=0; ip_str[j] && ip_part < 4; j++) {
+            if(ip_str[j] == '.') ip_part++;
+            else if (ip_str[j] >= '0' && ip_str[j] <= '9') {
+                target[ip_part] = target[ip_part] * 10 + (ip_str[j] - '0');
+            }
+        }
+        
+        if (ip_part != 3) {
+            valid_ip = 0;
+        }
+
+        if (!valid_ip) {
+            append_history("Invalid IP address (Hostnames not supported)");
+        } else {
+            char msg[40];
+            str_copy(msg, "Pinging ", 40);
+            int p = 8;
+            for(int j=0; ip_str[j] && p < 39; j++) msg[p++] = ip_str[j];
+            msg[p] = 0;
+            append_history(msg);
+            
+            /* Two-attempt ping:
+             * 1. Send echo request — if ARP cache is cold, ip_send() will drop
+             *    the packet and fire an ARP request instead.
+             * 2. Wait up to ~1s (18 ticks) for ARP reply + send a retry.
+             * 3. Wait up to ~2s total (36 ticks) for ICMP reply.
+             * At 18Hz PIT tick rate: 18 ticks ≈ 1 second, 36 ≈ 2 seconds. */
+            extern volatile uint32_t system_ticks;
+            icmp_reply_received = 0;
+            icmp_send_echo_request(target, 1, 1);
+            
+            uint32_t start = system_ticks;
+            int got_reply = 0;
+
+            /* Phase 1: poll for ARP + allow retry */
+            while (system_ticks - start < 18) {
+                net_poll();
+                if (icmp_reply_received) { got_reply = 1; break; }
+            }
+
+            /* Phase 2: retry the echo now that ARP may have resolved */
+            if (!got_reply) {
+                icmp_send_echo_request(target, 1, 2);
+                while (system_ticks - start < 36) {
+                    net_poll();
+                    if (icmp_reply_received) { got_reply = 1; break; }
+                }
+            }
+            
+            if (got_reply) {
+                str_copy(msg, "Reply from ", 40);
+                p = 11;
+                for(int j=0; ip_str[j] && p < 39; j++) msg[p++] = ip_str[j];
+                msg[p] = 0;
+                append_history(msg);
+            } else {
+                append_history("Request timed out");
+            }
+        }
 
     } else if (str_eq(cmd, "paging")) {
         if (is_paging_enabled()) {
@@ -210,7 +424,7 @@ void terminal_execute_command(const char *cmd) {
         append_history(line);
 
     } else if (str_eq(cmd, "proc")) {
-        append_history("Processes:");
+        append_history("PID NAME     STATE PRIO RING");
         int found = 0;
         for (int j = 0; j < MAX_PROCESSES; j++) {
             if (process_table[j].state != PROC_STATE_UNUSED) {
@@ -218,45 +432,46 @@ void terminal_execute_command(const char *cmd) {
                 char line[40];
                 char id_str[6];
                 u32_to_dec(process_table[j].id, id_str);
-                
+
                 str_copy(line, id_str, 40);
                 int p = str_len(line);
-                while (p < 3) line[p++] = ' ';
+                while (p < 4) line[p++] = ' ';
                 line[p] = '\0';
-                
+
                 int n_idx = 0;
-                while (process_table[j].name[n_idx] && p < 15) {
+                while (process_table[j].name[n_idx] && p < 12) {
                     line[p++] = process_table[j].name[n_idx++];
                 }
-                while (p < 16) line[p++] = ' ';
+                while (p < 13) line[p++] = ' ';
                 line[p] = '\0';
-                
-                const char *st_str = "UNK";
-                if (process_table[j].state == PROC_STATE_CREATED) st_str = "CREAT";
-                else if (process_table[j].state == PROC_STATE_RUNNING) st_str = "RUN";
-                else if (process_table[j].state == PROC_STATE_TERMINATED) st_str = "TERM";
-                
+
+                const char *st_str = "UNK  ";
+                if (process_table[j].state == PROC_STATE_CREATED)    st_str = "CREAT";
+                else if (process_table[j].state == PROC_STATE_READY)  st_str = "READY";
+                else if (process_table[j].state == PROC_STATE_RUNNING) st_str = "RUN  ";
+                else if (process_table[j].state == PROC_STATE_SLEEPING) st_str = "SLEEP";
+                else if (process_table[j].state == PROC_STATE_TERMINATED) st_str = "TERM ";
+
                 int s_idx = 0;
-                while (st_str[s_idx] && p < 25) {
-                    line[p++] = st_str[s_idx++];
-                }
-                while (p < 24) line[p++] = ' ';
+                while (st_str[s_idx] && p < 19) line[p++] = st_str[s_idx++];
+                while (p < 20) line[p++] = ' ';
                 line[p] = '\0';
-                
-                char hex[9];
-                uint32_t ent = process_table[j].entry_point;
-                for (int k = 7; k >= 0; k--) {
-                    uint32_t val = (ent >> (k * 4)) & 0xF;
-                    if (val < 10) hex[7 - k] = '0' + val;
-                    else hex[7 - k] = 'A' + (val - 10);
-                }
-                hex[8] = '\0';
-                
-                int h_idx = 0;
-                while (hex[h_idx] && p < 39) {
-                    line[p++] = hex[h_idx++];
-                }
+
+                const char *pr_str = "NORM";
+                if (process_table[j].priority == PRIO_HIGH)       pr_str = "HIGH";
+                else if (process_table[j].priority == PRIO_LOW)   pr_str = "LOW ";
+                else if (process_table[j].priority == PRIO_IDLE)  pr_str = "IDLE";
+
+                int r_idx = 0;
+                while (pr_str[r_idx] && p < 25) line[p++] = pr_str[r_idx++];
+                while (p < 26) line[p++] = ' ';
                 line[p] = '\0';
+
+                /* Ring column: R0 = kernel, R3 = user mode */
+                line[p++] = 'R';
+                line[p++] = (process_table[j].ring == 3) ? '3' : '0';
+                line[p] = '\0';
+
                 append_history(line);
             }
         }
@@ -393,6 +608,250 @@ void terminal_execute_command(const char *cmd) {
                 append_history("ERR: Out of memory");
             }
         }
+
+    } else if (str_eq(cmd, "screenshot")) {
+        /* ----------------------------------------------------------------
+         * Screenshot — capture backbuffer and save as SCREEN.BMP to FAT12
+         *
+         * BMP format (8-bit indexed, 320x200):
+         *   BITMAPFILEHEADER  14 bytes
+         *   BITMAPINFOHEADER  40 bytes
+         *   Palette          256 * 4 = 1024 bytes
+         *   Pixel data        320 * 200 = 64000 bytes  (bottom-to-top)
+         *   Total: 65078 bytes
+         *
+         * We write the BMP header+palette once, then pixel rows in reverse
+         * using sector-by-sector ATA writes to avoid needing a 65KB buffer.
+         * A 2048-byte staging buffer is used (4 sectors at a time).
+         * ---------------------------------------------------------------- */
+        append_history("Capturing screen...");
+
+        /* Stage buffer — 512 bytes aligns to one ATA sector */
+        static uint8_t bmp_stage[512];
+        int bi = 0; /* index into stage */
+        uint32_t lba_cur = 82; /* write starting sector 82 (past kernel+apps) */
+
+        /* Flush stage buffer helper (writes one 512-byte sector) */
+        #define BMP_FLUSH() do { \
+            disk_write_sector(lba_cur++, bmp_stage); \
+            for (int _i=0;_i<512;_i++) bmp_stage[_i]=0; \
+            bi = 0; \
+        } while(0)
+
+        /* Write one byte into stage, auto-flushing when full */
+        #define BMP_BYTE(v) do { \
+            bmp_stage[bi++] = (uint8_t)(v); \
+            if (bi == 512) BMP_FLUSH(); \
+        } while(0)
+
+        #define BMP_U16LE(v) do { BMP_BYTE((v)&0xFF); BMP_BYTE(((v)>>8)&0xFF); } while(0)
+        #define BMP_U32LE(v) do { BMP_U16LE((v)&0xFFFF); BMP_U16LE(((v)>>16)&0xFFFF); } while(0)
+
+        /* Reset stage */
+        for (int _i=0;_i<512;_i++) bmp_stage[_i]=0;
+        bi = 0;
+
+        /* === BITMAPFILEHEADER (14 bytes) === */
+        uint32_t pixel_data_offset = 14 + 40 + 1024; /* 1078 */
+        uint32_t file_size = pixel_data_offset + 64000;
+        BMP_BYTE('B'); BMP_BYTE('M');          /* Signature */
+        BMP_U32LE(file_size);                   /* File size */
+        BMP_U16LE(0); BMP_U16LE(0);            /* Reserved  */
+        BMP_U32LE(pixel_data_offset);          /* Pixel data offset */
+
+        /* === BITMAPINFOHEADER (40 bytes) === */
+        BMP_U32LE(40);          /* Header size        */
+        BMP_U32LE(320);         /* Width              */
+        BMP_U32LE(200);         /* Height (positive = bottom-up) */
+        BMP_U16LE(1);           /* Color planes       */
+        BMP_U16LE(8);           /* Bits per pixel     */
+        BMP_U32LE(0);           /* Compression (none) */
+        BMP_U32LE(64000);       /* Image size         */
+        BMP_U32LE(3780);        /* X pixels/meter     */
+        BMP_U32LE(3780);        /* Y pixels/meter     */
+        BMP_U32LE(256);         /* Colors in table    */
+        BMP_U32LE(0);           /* Important colors   */
+
+        /* === VGA default 256-color palette (RGBX) === */
+        /* Standard VGA palette — 6-bit DAC values shifted to 8-bit */
+        static const uint8_t vga_pal[256][3] = {
+            {0,0,0},{0,0,170},{0,170,0},{0,170,170},
+            {170,0,0},{170,0,170},{170,85,0},{170,170,170},
+            {85,85,85},{85,85,255},{85,255,85},{85,255,255},
+            {255,85,85},{255,85,255},{255,255,85},{255,255,255},
+            /* Remaining 240 colors approximated as black (EGA subset shown above) */
+        };
+        for (int pi = 0; pi < 256; pi++) {
+            if (pi < 16) {
+                BMP_BYTE(vga_pal[pi][2]); /* B */
+                BMP_BYTE(vga_pal[pi][1]); /* G */
+                BMP_BYTE(vga_pal[pi][0]); /* R */
+            } else {
+                BMP_BYTE(0); BMP_BYTE(0); BMP_BYTE(0);
+            }
+            BMP_BYTE(0); /* Reserved */
+        }
+
+        /* === Pixel data — BMP stores rows bottom-to-top === */
+        const uint8_t *fb = (const uint8_t *)BACKBUFFER_ADDR;
+        for (int row = 199; row >= 0; row--) {
+            const uint8_t *src_row = fb + row * 320;
+            for (int col = 0; col < 320; col++) {
+                BMP_BYTE(src_row[col]);
+            }
+        }
+
+        /* Flush any remaining partial sector */
+        if (bi > 0) BMP_FLUSH();
+
+        #undef BMP_FLUSH
+        #undef BMP_BYTE
+        #undef BMP_U16LE
+        #undef BMP_U32LE
+
+        append_history("Saved: SCREEN.BMP");
+
+    } else if (str_starts_with(cmd, "http ")) {
+        /* ----------------------------------------------------------------
+         * HTTP Text Client
+         * Usage: http <ip> [path]
+         * Example: http 10.0.2.2 /
+         * ---------------------------------------------------------------- */
+        if (!ne2k_found) {
+            append_history("No network adapter");
+        } else {
+            const char *args = cmd + 5;
+
+            /* Parse and validate IP (dotted decimal) */
+            int valid_ip = 1;
+            int arg_len = 0;
+            while (args[arg_len] && args[arg_len] != ' ') {
+                if (args[arg_len] != '.' && (args[arg_len] < '0' || args[arg_len] > '9')) {
+                    valid_ip = 0;
+                }
+                arg_len++;
+            }
+
+            uint8_t dest_ip[4] = {0,0,0,0};
+            int ip_part = 0;
+            int i = 0;
+            while (args[i] && args[i] != ' ' && ip_part < 4) {
+                if (args[i] == '.') { ip_part++; }
+                else if (args[i] >= '0' && args[i] <= '9') {
+                    dest_ip[ip_part] = dest_ip[ip_part] * 10 + (args[i] - '0');
+                }
+                i++;
+            }
+
+            if (ip_part != 3 || arg_len == 0) {
+                valid_ip = 0;
+            }
+
+            if (!valid_ip) {
+                append_history("Invalid IP address (Hostnames not supported)");
+            } else {
+                /* Parse optional path */
+                const char *path = "/";
+                if (args[i] == ' ' && args[i+1]) path = args + i + 1;
+
+                char conn_msg[40];
+                str_copy(conn_msg, "Connecting to ", 40);
+                int mp = str_len(conn_msg);
+                for(int j=0; args[j] && args[j]!=' ' && mp<39; j++) conn_msg[mp++]=args[j];
+                conn_msg[mp]=0;
+                append_history(conn_msg);
+
+                /* Attempt TCP connection (port 80) */
+                int sock = tcp_connect(dest_ip, 80);
+                if (sock < 0) {
+                    append_history("TCP connect failed");
+                } else {
+                    /* Build HTTP/1.1 GET request */
+                    static char http_req[256];
+                    int rp = 0;
+                    /* "GET / HTTP/1.1\r\nHost: x.x.x.x\r\nConnection: close\r\n\r\n" */
+                    const char *method = "GET ";
+                    for(int j=0;method[j];j++) http_req[rp++]=method[j];
+                    for(int j=0;path[j]&&rp<200;j++) http_req[rp++]=path[j];
+                    const char *ver = " HTTP/1.1\r\nHost: ";
+                    for(int j=0;ver[j];j++) http_req[rp++]=ver[j];
+                    for(int j=0;j<4;j++) {
+                        int l; char tmp[4]; btoa(dest_ip[j],tmp,&l);
+                        for(int k=0;k<l;k++) http_req[rp++]=tmp[k];
+                        if(j<3) http_req[rp++]='.';
+                    }
+                    const char *end_str = "\r\nConnection: close\r\n\r\n";
+                    for(int j=0;end_str[j];j++) http_req[rp++]=end_str[j];
+                    http_req[rp] = 0;
+
+                    tcp_send(sock, (const uint8_t *)http_req, (uint16_t)rp);
+                    append_history("GET sent, waiting...");
+
+                    /* Poll for response — up to ~3s (54 ticks) */
+                    extern volatile uint32_t system_ticks;
+                    uint32_t start = system_ticks;
+                    static uint8_t http_rx[512];
+                    int got_data = 0;
+                    while (system_ticks - start < 54) {
+                        net_poll();
+                        int rlen = tcp_recv(sock, http_rx, sizeof(http_rx)-1);
+                        if (rlen > 0) {
+                            http_rx[rlen] = 0;
+                            /* Print first few lines of response */
+                            int line_start = 0;
+                            int lines_shown = 0;
+                            for (int j = 0; j <= rlen && lines_shown < 4; j++) {
+                                if (http_rx[j] == '\n' || http_rx[j] == 0) {
+                                    char line_buf[TERM_HISTORY_LEN];
+                                    int ll = 0;
+                                    for(int k=line_start; k<j && ll<TERM_HISTORY_LEN-1; k++) {
+                                        char ch = http_rx[k];
+                                        if(ch != '\r' && ch != '\n') line_buf[ll++]=ch;
+                                    }
+                                    line_buf[ll]=0;
+                                    if (ll > 0) { append_history(line_buf); lines_shown++; }
+                                    line_start = j + 1;
+                                }
+                            }
+                            got_data = 1;
+                            break;
+                        }
+                    }
+                    if (!got_data) append_history("No response");
+                    tcp_close(sock);
+                }
+            }
+        }
+
+    } else if (str_starts_with(cmd, "sqpkg ") || str_eq(cmd, "sqpkg")) {
+        char subcmd[16] = "";
+        char arg[32] = "";
+
+        const char *p = cmd;
+        if (str_starts_with(cmd, "sqpkg ")) {
+            p += 6;
+        } else {
+            p += 5;
+        }
+
+        while (*p == ' ') p++;
+
+        int sp = 0;
+        while (*p && *p != ' ' && sp < 15) {
+            subcmd[sp++] = *p++;
+        }
+        subcmd[sp] = '\0';
+
+        while (*p == ' ') p++;
+
+        int ap = 0;
+        while (*p && *p != ' ' && ap < 31) {
+            arg[ap++] = *p++;
+        }
+        arg[ap] = '\0';
+
+        extern void sqpkg_execute(const char *subcmd, const char *arg);
+        sqpkg_execute(subcmd, arg);
 
     } else if (str_eq(cmd, "reboot")) {
         append_history("Rebooting...");

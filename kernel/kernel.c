@@ -3,8 +3,11 @@
 #include "graphics.h"
 #include "memory.h"
 #include "paging.h"
+#include "gdt.h"
+#include "tss.h"
 #include "process.h"
 #include "syscall.h"
+#include "../net/net.h"
 
 #define VIDEO_MEM ((volatile uint16_t *)0xB8000)
 #define MAX_ROWS 25
@@ -320,10 +323,27 @@ void init_vga_mode13(void) {
             break;
         }
     }
+
+    // Mask keyboard (IRQ1) and mouse (IRQ12) interrupts on the PIC,
+    // so they do not trigger the CPU interrupt handlers (preserving polling in the GUI loop),
+    // but keep other interrupts (such as the timer IRQ0) unmasked.
+    uint8_t master_mask = inb(0x21);
+    uint8_t slave_mask = inb(0xA1);
+    outb(0x21, master_mask | 0x02); // Mask IRQ1 (keyboard)
+    outb(0xA1, slave_mask | 0x10);  // Mask IRQ12 (mouse)
+
+    // Enable CPU interrupts (timer IRQ0 will now fire in the background)
+    __asm__ volatile("sti");
 }
 
 void restore_text_mode(void) {
     __asm__ volatile("cli");
+
+    // Unmask keyboard (IRQ1) and mouse (IRQ12) interrupts on the PIC
+    uint8_t master_mask = inb(0x21);
+    uint8_t slave_mask = inb(0xA1);
+    outb(0x21, master_mask & ~0x02); // Unmask IRQ1 (keyboard)
+    outb(0xA1, slave_mask & ~0x10);  // Unmask IRQ12 (mouse)
 
     // Misc Output
     outb(0x3C2, 0x67);
@@ -404,11 +424,20 @@ void kernel_main(void) {
     // Initialise virtual memory paging (maps kernel 4MB and user 4MB)
     paging_init();
 
+    // 0a. Load 6-entry GDT with Ring 3 (user) code and data segments
+    gdt_init();
+
+    // 0b. Initialise TSS and load TR register (needed for Ring 3 interrupts)
+    tss_init();
+
     // Initialise process control block system
     process_init();
 
     // Initialise system call routing
     syscall_init();
+
+    // Initialise networking stack
+    net_init();
 
     // 1. Immediately transition to VGA graphics mode 13h
     init_vga_mode13();
@@ -434,6 +463,7 @@ void kernel_main(void) {
 
     // Idle loop
     while (1) {
+        net_poll();
         __asm__ volatile("hlt");
     }
 }
